@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/anmura/pgak/internal/ui/editor"
+	"pgak/internal/ui/editor"
 )
 
 var (

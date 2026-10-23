@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/anmura/pgak/internal/config"
+	"pgak/internal/config"
 )
 
 // ConnForm is a classic form to create/edit a connection.
@@ -66,8 +66,8 @@ func NewConnForm(old *config.Connection) *ConnForm {
 			"Port TCP (docker : le port *externe*, ex. 5434 pour 5434->5432)"},
 		{"User", c.User, "postgres",
 			"Utilisateur postgres"},
-		{"Mot de passe (var env)", c.PasswordEnv, "PGAK_PROD_PASSWORD",
-			"⚠ PAS le mot de passe ! Le NOM d'une variable d'env qui le contient.\n   Ex: PGAK_PROD_PASSWORD puis → fish: set -x PGAK_PROD_PASSWORD monmdp\n   (bash/zsh: export PGAK_PROD_PASSWORD=monmdp) · vide = pas de mot de passe"},
+		{"Mot de passe (var env)", c.PasswordEnv, "PGAK_DB_PASSWORD",
+			"⚠ PAS le mot de passe ! Le NOM d'une variable d'env qui le contient.\n   Ex: PGAK_DB_PASSWORD puis → fish: set -x PGAK_DB_PASSWORD monmdp\n   (bash/zsh: export PGAK_DB_PASSWORD=monmdp) · vide = pas de mot de passe"},
 		{"Database", c.Database, "postgres",
 			"Base par défaut à l'ouverture (vide = postgres)"},
 		{"SSL mode", defaultStr(c.SSLMode, "prefer"), "prefer",

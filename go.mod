@@ -1,4 +1,4 @@
-module github.com/anmura/pgak
+module pgak
 
 go 1.27.1
 

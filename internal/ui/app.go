@@ -10,10 +10,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/anmura/pgak/internal/config"
-	"github.com/anmura/pgak/internal/db"
-	"github.com/anmura/pgak/internal/history"
-	"github.com/anmura/pgak/internal/ui/editor"
+	"pgak/internal/config"
+	"pgak/internal/db"
+	"pgak/internal/history"
+	"pgak/internal/ui/editor"
 )
 
 type Zone int
@@ -172,7 +172,7 @@ func connectCmd(c config.Connection, database string) tea.Cmd {
 		log.Printf("connexion: name=%s host=%s port=%d user=%s db=%s sslmode=%s password_env=%s",
 			c.Name, c.Host, c.Port, c.User, database, c.SSLMode, c.PasswordEnv)
 		if c.PasswordEnv != "" && os.Getenv(c.PasswordEnv) == "" {
-			err := fmt.Errorf("la variable d'env « %s » est vide ou non définie — ce champ attend le NOM d'une variable (ex: PGAK_PROD_PASSWORD), pas le mot de passe", c.PasswordEnv)
+			err := fmt.Errorf("la variable d'env « %s » est vide ou non définie — ce champ attend le NOM d'une variable (ex: PGAK_DB_PASSWORD), pas le mot de passe", c.PasswordEnv)
 			log.Printf("connexion: %v", err)
 			return connectedMsg{connName: c.Name, err: err}
 		}

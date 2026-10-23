@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/anmura/pgak/internal/config"
+	"pgak/internal/config"
 )
 
 // Live test against a local postgres. Run with: PGAK_LIVE=1 go test ./internal/db

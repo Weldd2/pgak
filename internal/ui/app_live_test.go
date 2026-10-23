@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/anmura/pgak/internal/config"
-	"github.com/anmura/pgak/internal/history"
+	"pgak/internal/config"
+	"pgak/internal/history"
 )
 
 // End-to-end against local postgres: PGAK_LIVE=1 go test ./internal/ui -run TestLiveFlow

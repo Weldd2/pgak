@@ -11,9 +11,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/anmura/pgak/internal/config"
-	"github.com/anmura/pgak/internal/history"
-	"github.com/anmura/pgak/internal/ui"
+	"pgak/internal/config"
+	"pgak/internal/history"
+	"pgak/internal/ui"
 )
 
 func usage() {
@@ -50,7 +50,7 @@ Dans l'application :
   q / ctrl+c          quitter
 
 Mots de passe : jamais stockés — le champ « Mot de passe (var env) » attend le
-NOM d'une variable d'environnement (ex : PGAK_PROD_PASSWORD).
+NOM d'une variable d'environnement (ex : PGAK_DB_PASSWORD).
 `, cfgPath, histPath, sessPath, logPath)
 }
 

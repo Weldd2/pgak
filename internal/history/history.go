@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anmura/pgak/internal/config"
+	"pgak/internal/config"
 )
 
 const maxEntries = 500

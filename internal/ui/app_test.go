@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/anmura/pgak/internal/config"
-	"github.com/anmura/pgak/internal/history"
+	"pgak/internal/config"
+	"pgak/internal/history"
 )
 
 func newTestApp() *App {

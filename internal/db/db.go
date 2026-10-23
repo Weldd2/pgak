@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/anmura/pgak/internal/config"
+	"pgak/internal/config"
 )
 
 // Result holds the outcome of a query.

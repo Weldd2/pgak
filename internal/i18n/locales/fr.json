@@ -10,7 +10,7 @@
   "header.schema": "Schéma",
   "header.hint": " h/l choisir · ↵ ouvrir · esc fenêtres",
 
-  "editor.title": "Requête (ctrl+e exécuter · ctrl+p historique)",
+  "editor.title": "Requête (ctrl+e exécuter · ctrl+p historique · ctrl+n compléter)",
   "editor.banner": "  SET search_path TO %s;  -- appliqué automatiquement (schéma sélectionné)",
 
   "results.title": "Résultats",
@@ -36,7 +36,7 @@
   "results.help.search.start": "  /                      rechercher dans les résultats (↵ valider, esc annuler)",
   "results.help.search.next": "  n / N                  occurrence suivante / précédente",
   "results.help.misc": "Divers",
-  "results.help.misc.esc": "  esc  revenir au mode fenêtres    q  quitter",
+  "results.help.misc.esc": "  esc  revenir au mode fenêtres    q  quitter (Q : sans confirmation)",
   "results.help.close": "appuyez sur une touche pour fermer",
 
   "window.help.title": "Fenêtres — aide",
@@ -49,7 +49,7 @@
   "window.help.global.history": "  ctrl+p                 historique des requêtes",
   "window.help.global.actions": "  ctrl+t                 quick actions",
   "window.help.global.config": "  ctrl+o                 ouvrir le fichier de configuration ($EDITOR)",
-  "window.help.global.quit": "  q / ctrl+c             quitter",
+  "window.help.global.quit": "  q / ctrl+c             quitter (Q : sans confirmation)",
   "results.empty": "Aucun résultat — exécutez une requête (ctrl+e)",
   "results.info.rows": "%d ligne(s) · %s",
   "results.info.affected": "%d ligne(s) affectée(s) · %s",
@@ -177,8 +177,11 @@
   "help.inapp.actions": "  ctrl+t              quick actions (tables, colonnes, tailles, activité…)",
   "help.inapp.config": "  ctrl+o              ouvrir le fichier de configuration dans $EDITOR",
   "help.inapp.help": "  ?                   aide (mode fenêtres et fenêtre résultats)",
-  "help.inapp.quit": "  q / ctrl+c          quitter",
+  "help.inapp.quit": "  q / ctrl+c          quitter (Q : sans confirmation)",
   "help.passwords": "Mots de passe : jamais stockés — le champ « Mot de passe (var env) » attend le\nNOM d'une variable d'environnement (ex : PGAK_DB_PASSWORD).",
+
+  "confirm.quit.title": "Quitter pgak ?",
+  "confirm.quit.hint": "↵ / y  quitter · esc / n  annuler",
 
   "language.select": "Language / Langue",
   "language.english": "English",

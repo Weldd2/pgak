@@ -69,6 +69,7 @@ type App struct {
 	tableAction string // pending quick action needing a table
 	form        *ConnForm
 	showHelp    string // help overlay (?): helpNone, helpResults or helpWindow
+	confirmQuit bool   // quit confirmation overlay (q)
 
 	initialConn string // --connexion or restored session: connect at startup
 	initialDB   string // database to open at startup (restored session)
@@ -186,6 +187,29 @@ type editorFinishedMsg struct {
 	err error
 }
 
+type completionsMsg struct {
+	tables  []string
+	columns []string
+	err     error
+}
+
+// completionsCmd fetches table and column names of a schema to feed the
+// editor autocompletion.
+func completionsCmd(client *db.Client, schema string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		tables, err := client.ListTables(ctx, schema)
+		if err != nil {
+			return completionsMsg{err: err}
+		}
+		columns, err := client.ListColumns(ctx, schema)
+		if err != nil {
+			return completionsMsg{err: err}
+		}
+		return completionsMsg{tables: tables, columns: columns}
+	}
+}
+
 func connectCmd(c config.Connection, database string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -273,6 +297,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.updateBanner()
 		a.setOK(fmt.Sprintf(i18n.T("status.connected"), msg.connName, a.database))
+		return a, completionsCmd(a.client, a.schema)
+
+	case completionsMsg:
+		if msg.err != nil {
+			log.Printf("complétion: %v", msg.err)
+			return a, nil
+		}
+		a.ed.SetCompletions(buildCompletions(msg.tables, msg.columns))
 		return a, nil
 
 	case queryDoneMsg:
@@ -345,6 +377,17 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.quit()
 	}
 
+	// ----- quit confirmation overlay (q): ↵/y confirm, esc/n cancel
+	if a.confirmQuit {
+		switch key {
+		case "y", "Y", "enter":
+			return a.quit()
+		case "n", "N", "esc", "q":
+			a.confirmQuit = false
+		}
+		return a, nil
+	}
+
 	// ----- help overlay: any key closes it
 	if a.showHelp != helpNone {
 		a.showHelp = helpNone
@@ -390,7 +433,9 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+e", "f5":
 		return a.runQuery()
 	case "ctrl+p":
-		if a.zone == ZoneEditor || a.zone == ZoneHeader {
+		// with the completion popup open, ctrl+p cycles the suggestions
+		compNav := a.focused && a.zone == ZoneEditor && a.ed.CompletionActive()
+		if !compNav && (a.zone == ZoneEditor || a.zone == ZoneHeader) {
 			a.openHistoryModal()
 			return a, nil
 		}
@@ -442,10 +487,11 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.setZone(ZoneResults)
 		case "?":
 			a.showHelp = helpWindow
-		case "q", "esc":
-			if key == "q" {
-				return a.quit()
-			}
+		case "q":
+			a.confirmQuit = true
+		case "Q":
+			return a.quit()
+		case "esc":
 		}
 		return a, nil
 	}
@@ -469,8 +515,12 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// q quits from the results zone (vim-ish habit)
+	// q quits from the results zone (vim-ish habit) — Q skips confirmation
 	if key == "q" && a.zone == ZoneResults && a.res.PendingKeys() == "" {
+		a.confirmQuit = true
+		return a, nil
+	}
+	if key == "Q" && a.zone == ZoneResults && a.res.PendingKeys() == "" {
 		return a.quit()
 	}
 
@@ -729,6 +779,9 @@ func (a *App) handleModalResult(res *SelectResult) (tea.Model, tea.Cmd) {
 			a.schema = res.Item.Value.(string)
 			a.updateBanner()
 			a.setOK(fmt.Sprintf("%s: %s", i18n.T("header.schema"), a.schema))
+			if a.client != nil {
+				return a, completionsCmd(a.client, a.schema)
+			}
 		}
 
 	case purpHistory:

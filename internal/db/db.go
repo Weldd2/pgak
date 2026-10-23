@@ -135,6 +135,14 @@ func (c *Client) ListTables(ctx context.Context, schema string) ([]string, error
 		 WHERE table_schema = $1 ORDER BY table_name`, schema)
 }
 
+// ListColumns returns the distinct column names of all tables of a schema
+// (used for query autocompletion).
+func (c *Client) ListColumns(ctx context.Context, schema string) ([]string, error) {
+	return c.listStrings(ctx,
+		`SELECT DISTINCT column_name FROM information_schema.columns
+		 WHERE table_schema = $1 ORDER BY column_name`, schema)
+}
+
 func (c *Client) listStrings(ctx context.Context, sql string, args ...any) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

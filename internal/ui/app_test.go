@@ -436,13 +436,71 @@ func TestQuitSavesSession(t *testing.T) {
 	a := newTestApp()
 	a.connName, a.database, a.schema = "local", "appdb", "ventes"
 	press(a, "enter", "i", "s", "esc") // type "s" in the editor
-	press(a, "esc", "q")               // back to window mode, quit
+	press(a, "esc", "q", "enter")      // back to window mode, quit (confirmed)
 	s, err := config.LoadSession()
 	if err != nil || s == nil {
 		t.Fatalf("session not saved: %v", err)
 	}
 	if s.Connection != "local" || s.Database != "appdb" || s.Schema != "ventes" || s.Query != "s" {
 		t.Fatalf("session=%+v", s)
+	}
+}
+
+func TestQuitConfirmation(t *testing.T) {
+	a := newTestApp()
+	// q in window mode opens the confirmation, esc cancels
+	press(a, "q")
+	if !a.confirmQuit {
+		t.Fatal("q should open the quit confirmation")
+	}
+	if !strings.Contains(a.View(), "Quitter pgak ?") {
+		t.Fatal("confirmation overlay not rendered")
+	}
+	press(a, "esc")
+	if a.confirmQuit {
+		t.Fatal("esc should cancel the quit confirmation")
+	}
+	// n cancels too
+	press(a, "q", "n")
+	if a.confirmQuit {
+		t.Fatal("n should cancel the quit confirmation")
+	}
+	// y confirms
+	press(a, "q")
+	_, cmd := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if cmd == nil {
+		t.Fatal("y should quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("expected a tea.Quit command")
+	}
+}
+
+func TestQQuitsWithoutConfirmation(t *testing.T) {
+	a := newTestApp()
+	_, cmd := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Q")})
+	if cmd == nil {
+		t.Fatal("Q should quit immediately")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("expected a tea.Quit command")
+	}
+	if a.confirmQuit {
+		t.Fatal("Q must not open the confirmation")
+	}
+}
+
+func TestQuitConfirmationFromResults(t *testing.T) {
+	a := newTestApp()
+	a.res.SetData([]string{"id"}, [][]string{{"1"}})
+	press(a, "j", "enter") // focus results
+	press(a, "q")
+	if !a.confirmQuit {
+		t.Fatal("q in results should open the quit confirmation")
+	}
+	press(a, "n")
+	if a.confirmQuit {
+		t.Fatal("n should cancel")
 	}
 }
 

@@ -70,10 +70,17 @@ type Editor struct {
 
 	banner string // dim, non-editable line shown above the buffer
 
-	cursorStyle lipgloss.Style
-	selStyle    lipgloss.Style
-	numStyle    lipgloss.Style
-	bannerStyle lipgloss.Style
+	completions []string // candidate words for insert-mode completion
+	compActive  bool     // completion popup open
+	compItems   []string // filtered candidates
+	compSel     int      // selected candidate
+
+	cursorStyle   lipgloss.Style
+	selStyle      lipgloss.Style
+	numStyle      lipgloss.Style
+	bannerStyle   lipgloss.Style
+	popupStyle    lipgloss.Style
+	popupSelStyle lipgloss.Style
 }
 
 func New() *Editor {
@@ -83,6 +90,9 @@ func New() *Editor {
 		selStyle:    lipgloss.NewStyle().Background(lipgloss.Color("24")).Foreground(lipgloss.Color("255")),
 		numStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
 		bannerStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Italic(true),
+		popupStyle:  lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("252")),
+		popupSelStyle: lipgloss.NewStyle().Background(lipgloss.Color("24")).
+			Foreground(lipgloss.Color("231")).Bold(true),
 	}
 }
 
@@ -155,6 +165,7 @@ func (e *Editor) SetValue(s string) {
 	e.pending, e.gPend, e.count = 0, false, 0
 	e.objPend, e.findPend = 0, 0
 	e.undos, e.redos = nil, nil
+	e.closeCompletion()
 }
 
 // ---------------------------------------------------------------- helpers
@@ -432,7 +443,18 @@ func (e *Editor) Update(msg tea.KeyMsg) {
 }
 
 func (e *Editor) updateInsert(msg tea.KeyMsg) {
-	switch msg.String() {
+	key := msg.String()
+
+	// completion popup consumes its navigation/validation keys
+	if e.compActive && e.handleCompletionKey(key) {
+		return
+	}
+	if key == "ctrl+n" { // manual trigger
+		e.openCompletion(1)
+		return
+	}
+
+	switch key {
 	case "esc":
 		e.mode = Normal
 		if e.col > 0 {
@@ -458,13 +480,16 @@ func (e *Editor) updateInsert(msg tea.KeyMsg) {
 			e.lines = append(e.lines[:e.row], e.lines[e.row+1:]...)
 			e.row--
 		}
+		e.refreshCompletion()
 	case "tab":
 		e.insertRunes([]rune("    "))
 	case "left":
+		e.closeCompletion()
 		if e.col > 0 {
 			e.col--
 		}
 	case "right":
+		e.closeCompletion()
 		if e.col < len(e.line()) {
 			e.col++
 		}
@@ -485,6 +510,12 @@ func (e *Editor) updateInsert(msg tea.KeyMsg) {
 				runes = []rune{' '}
 			}
 			e.insertRunes(runes)
+			// auto-open (or refresh) the completion popup while typing
+			if e.compActive {
+				e.refreshCompletion()
+			} else if len(runes) == 1 && classOf(runes[0]) == 1 {
+				e.openCompletion(compAutoMinChars)
+			}
 		}
 	}
 }
@@ -1536,7 +1567,11 @@ func (e *Editor) View() string {
 			sb.WriteString(e.cursorStyle.Render(" "))
 		}
 	}
-	return sb.String()
+	out := sb.String()
+	if e.compActive && e.focused && e.mode == Insert {
+		out = e.overlayCompletion(out)
+	}
+	return out
 }
 
 func padLeft(s string, w int) string {

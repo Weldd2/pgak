@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,6 +21,16 @@ func key(e *Editor, keys ...string) {
 			msg = tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
 		case "ctrl+r":
 			msg = tea.KeyMsg{Type: tea.KeyCtrlR}
+		case "ctrl+n":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlN}
+		case "ctrl+p":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlP}
+		case "tab":
+			msg = tea.KeyMsg{Type: tea.KeyTab}
+		case "down":
+			msg = tea.KeyMsg{Type: tea.KeyDown}
+		case "up":
+			msg = tea.KeyMsg{Type: tea.KeyUp}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 		}
@@ -374,6 +385,140 @@ func TestVisualTextObject(t *testing.T) {
 	key(e, "g", "g", "0", "P")
 	if e.Value() != "bar bazfoo (bar baz) qux" {
 		t.Fatalf("vi(y: got %q", e.Value())
+	}
+}
+
+func newCompEditor() *Editor {
+	e := New()
+	e.SetSize(60, 10)
+	e.SetCompletions([]string{"users", "user_roles", "SELECT", "FROM"})
+	return e
+}
+
+func TestCompletionAutoOpenAndAccept(t *testing.T) {
+	e := newCompEditor()
+	key(e, "i")
+	typeText(e, "us") // 2 chars: auto-open
+	if !e.CompletionActive() {
+		t.Fatal("popup should auto-open after 2 chars")
+	}
+	if len(e.compItems) != 2 {
+		t.Fatalf("items=%v", e.compItems)
+	}
+	key(e, "tab")
+	if e.Value() != "users" {
+		t.Fatalf("accept: got %q", e.Value())
+	}
+	if e.CompletionActive() {
+		t.Fatal("popup should close after accept")
+	}
+	if e.Mode() != Insert {
+		t.Fatal("accept should stay in insert mode")
+	}
+}
+
+func TestCompletionNavigateAndEnter(t *testing.T) {
+	e := newCompEditor()
+	key(e, "i")
+	typeText(e, "us")
+	key(e, "ctrl+n") // select 2nd item
+	key(e, "enter")
+	if e.Value() != "user_roles" {
+		t.Fatalf("got %q", e.Value())
+	}
+	// ctrl+p wraps back
+	key(e, "esc", "d", "d", "i")
+	typeText(e, "us")
+	key(e, "ctrl+p", "ctrl+p", "enter") // down 2 with wrap → back to first... (2 items: p,p = same)
+	if e.Value() != "users" {
+		t.Fatalf("got %q", e.Value())
+	}
+}
+
+func TestCompletionKeywordCase(t *testing.T) {
+	e := newCompEditor()
+	key(e, "i")
+	typeText(e, "sel")
+	if !e.CompletionActive() {
+		t.Fatal("popup should be open")
+	}
+	key(e, "enter")
+	if e.Value() != "select" {
+		t.Fatalf("lowercase prefix should insert lowercase keyword, got %q", e.Value())
+	}
+	key(e, "esc", "d", "d", "i")
+	typeText(e, "SEL")
+	key(e, "enter")
+	if e.Value() != "SELECT" {
+		t.Fatalf("uppercase prefix keeps the keyword case, got %q", e.Value())
+	}
+}
+
+func TestCompletionEscClosesAndStaysInsert(t *testing.T) {
+	e := newCompEditor()
+	key(e, "i")
+	typeText(e, "us")
+	key(e, "esc")
+	if e.CompletionActive() {
+		t.Fatal("esc should close the popup")
+	}
+	if e.Mode() != Insert {
+		t.Fatal("first esc only closes the popup")
+	}
+	key(e, "esc")
+	if e.Mode() != Normal {
+		t.Fatal("second esc leaves insert mode")
+	}
+}
+
+func TestCompletionRefilterAndClose(t *testing.T) {
+	e := newCompEditor()
+	key(e, "i")
+	typeText(e, "user_")
+	if !e.CompletionActive() || len(e.compItems) != 1 {
+		t.Fatalf("expected 1 item, got %v", e.compItems)
+	}
+	typeText(e, "x") // no match → closes
+	if e.CompletionActive() {
+		t.Fatal("popup should close when nothing matches")
+	}
+	key(e, "backspace") // backspace alone must not reopen
+	if e.CompletionActive() {
+		t.Fatal("popup should stay closed after backspace")
+	}
+	// exact word fully typed: not proposed
+	key(e, "esc", "d", "d", "i")
+	typeText(e, "users")
+	if e.CompletionActive() {
+		t.Fatal("exact match only should not open the popup")
+	}
+}
+
+func TestCompletionManualCtrlN(t *testing.T) {
+	e := newCompEditor()
+	key(e, "i")
+	typeText(e, "u") // 1 char: no auto-open
+	if e.CompletionActive() {
+		t.Fatal("popup must not auto-open below 2 chars")
+	}
+	key(e, "ctrl+n")
+	if !e.CompletionActive() {
+		t.Fatal("ctrl+n should open the popup manually")
+	}
+	key(e, "enter")
+	if e.Value() != "users" {
+		t.Fatalf("got %q", e.Value())
+	}
+}
+
+func TestCompletionPopupRender(t *testing.T) {
+	e := newCompEditor()
+	e.SetFocused(true)
+	key(e, "i")
+	typeText(e, "us")
+	v := e.View()
+	if !strings.Contains(v, "users") || !strings.Contains(v, "user_roles") {
+		t.Fatalf("popup items not rendered:\n%s", v)
 	}
 }
 

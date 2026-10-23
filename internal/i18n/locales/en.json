@@ -10,7 +10,7 @@
   "header.schema": "Schema",
   "header.hint": " h/l select · ↵ open · esc windows",
 
-  "editor.title": "Query (ctrl+e execute · ctrl+p history)",
+  "editor.title": "Query (ctrl+e execute · ctrl+p history · ctrl+n complete)",
   "editor.banner": "  SET search_path TO %s;  -- applied automatically (selected schema)",
 
   "results.title": "Results",
@@ -36,7 +36,7 @@
   "results.help.search.start": "  /                      search in results (↵ confirm, esc cancel)",
   "results.help.search.next": "  n / N                  next / previous match",
   "results.help.misc": "Miscellaneous",
-  "results.help.misc.esc": "  esc  return to window mode    q  quit",
+  "results.help.misc.esc": "  esc  return to window mode    q  quit (Q: without confirmation)",
   "results.help.close": "press any key to close",
 
   "window.help.title": "Windows — Help",
@@ -49,7 +49,7 @@
   "window.help.global.history": "  ctrl+p                 query history",
   "window.help.global.actions": "  ctrl+t                 quick actions",
   "window.help.global.config": "  ctrl+o                 open the config file ($EDITOR)",
-  "window.help.global.quit": "  q / ctrl+c             quit",
+  "window.help.global.quit": "  q / ctrl+c             quit (Q: without confirmation)",
   "results.empty": "No results — execute a query (ctrl+e)",
   "results.info.rows": "%d row(s) · %s",
   "results.info.affected": "%d row(s) affected · %s",
@@ -177,8 +177,11 @@
   "help.inapp.actions": "  ctrl+t              quick actions (tables, columns, sizes, activity…)",
   "help.inapp.config": "  ctrl+o              open the config file in $EDITOR",
   "help.inapp.help": "  ?                   help (window mode and results window)",
-  "help.inapp.quit": "  q / ctrl+c          quit",
+  "help.inapp.quit": "  q / ctrl+c          quit (Q: without confirmation)",
   "help.passwords": "Passwords: never stored — the \"Password (env var)\" field expects the\nNAME of an environment variable (e.g., PGAK_DB_PASSWORD).",
+
+  "confirm.quit.title": "Quit pgak?",
+  "confirm.quit.hint": "↵ / y  quit · esc / n  cancel",
 
   "language.select": "Language / Langue",
   "language.english": "English",

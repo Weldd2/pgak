@@ -194,6 +194,21 @@ func (a *App) View() string {
 
 	main := lipgloss.JoinVertical(lipgloss.Left, header, editorBox, resultsBox, a.statusBar())
 
+	// quit confirmation overlay (q)
+	if a.confirmQuit {
+		content := lipgloss.JoinVertical(lipgloss.Center,
+			lipgloss.NewStyle().Bold(true).Foreground(colAccent).Render(i18n.T("confirm.quit.title")),
+			"",
+			dimText.Render(i18n.T("confirm.quit.hint")),
+		)
+		box := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colAccent).
+			Padding(0, 2).
+			Render(content)
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, box)
+	}
+
 	// help overlay (?)
 	if a.showHelp != helpNone {
 		content := resultsHelp()

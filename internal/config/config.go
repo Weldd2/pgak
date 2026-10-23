@@ -71,6 +71,7 @@ func kv(k, v string) string {
 
 type Config struct {
 	Connections []Connection `json:"connections"`
+	Language    string       `json:"language,omitempty"` // "en" or "fr", defaults to "en"
 }
 
 func dir() (string, error) {

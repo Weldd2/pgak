@@ -9,12 +9,17 @@ import (
 
 	"pgak/internal/config"
 	"pgak/internal/history"
+	"pgak/internal/i18n"
 )
 
 func newTestApp() *App {
-	cfg := &config.Config{Connections: []config.Connection{
-		{Name: "local", Host: "localhost", Port: 5432, User: "me"},
-	}}
+	i18n.SetLanguage("fr") // tests assert French labels
+	cfg := &config.Config{
+		Language: "fr", // skip the first-launch language picker
+		Connections: []config.Connection{
+			{Name: "local", Host: "localhost", Port: 5432, User: "me"},
+		},
+	}
 	a := NewApp(cfg, &history.History{})
 	a.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	return a
@@ -215,6 +220,70 @@ func TestResultsGGScrollAndCounts(t *testing.T) {
 	}
 }
 
+func TestResultsSearch(t *testing.T) {
+	r := NewResults()
+	r.SetSize(80, 8)
+	r.SetData([]string{"id", "name"}, [][]string{
+		{"1", "alice"},
+		{"2", "bob"},
+		{"3", "alicia"},
+		{"4", "carol"},
+	})
+	k := func(keys ...string) {
+		for _, s := range keys {
+			switch s {
+			case "enter":
+				r.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			case "esc":
+				r.Update(tea.KeyMsg{Type: tea.KeyEsc})
+			default:
+				r.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)})
+			}
+		}
+	}
+	// / opens the prompt, typing jumps incrementally (case-insensitive)
+	k("/")
+	if !r.searching || r.PendingKeys() == "" {
+		t.Fatal("/ should enter search mode")
+	}
+	k("ALI", "enter")
+	if r.searching {
+		t.Fatal("enter should close the prompt")
+	}
+	if r.curRow != 0 || r.curCol != 1 {
+		t.Fatalf("search ali: cur=(%d,%d)", r.curRow, r.curCol)
+	}
+	// n / N cycle through matches with wrap-around
+	k("n")
+	if r.curRow != 2 || r.curCol != 1 {
+		t.Fatalf("n: cur=(%d,%d)", r.curRow, r.curCol)
+	}
+	k("n") // wraps back to the first match
+	if r.curRow != 0 || r.curCol != 1 {
+		t.Fatalf("n wrap: cur=(%d,%d)", r.curRow, r.curCol)
+	}
+	k("N")
+	if r.curRow != 2 || r.curCol != 1 {
+		t.Fatalf("N: cur=(%d,%d)", r.curRow, r.curCol)
+	}
+	// esc cancels and restores the original position
+	k("g", "g", "0", "/", "bob", "esc")
+	if r.searching || r.searchQuery != "" {
+		t.Fatal("esc should cancel the search")
+	}
+	if r.curRow != 0 || r.curCol != 0 {
+		t.Fatalf("esc should restore position: cur=(%d,%d)", r.curRow, r.curCol)
+	}
+	// no match: status message, cursor untouched
+	k("/", "zzz", "enter")
+	if r.Status == "" {
+		t.Fatal("expected a no-match status")
+	}
+	if r.curRow != 0 || r.curCol != 0 {
+		t.Fatalf("no match must not move: cur=(%d,%d)", r.curRow, r.curCol)
+	}
+}
+
 func TestResultsNavigationAndRender(t *testing.T) {
 	a := newTestApp()
 	a.res.SetData([]string{"id", "name"}, [][]string{{"1", "alice"}, {"2", "bob"}})
@@ -232,28 +301,34 @@ func TestResultsNavigationAndRender(t *testing.T) {
 func TestResultsHelpOverlay(t *testing.T) {
 	a := newTestApp()
 	a.res.SetData([]string{"id"}, [][]string{{"1"}})
-	// from window-selection mode, on the results window
+	// from window-selection mode: ? opens the window-mode help
 	press(a, "j", "?")
-	if !a.showHelp {
-		t.Fatal("? should open help from window-selection mode on results")
+	if a.showHelp != helpWindow {
+		t.Fatalf("? should open the window help from window-selection mode, got %q", a.showHelp)
 	}
 	v := a.View()
-	for _, s := range []string{"yc", "yY", "ya", "Copier", "Navigation"} {
+	for _, s := range []string{"ctrl+o", "ctrl+t", "Fenêtres", "Navigation"} {
 		if !strings.Contains(v, s) {
-			t.Fatalf("help missing %q", s)
+			t.Fatalf("window help missing %q", s)
 		}
 	}
 	press(a, "esc") // any key closes
-	if a.showHelp {
+	if a.showHelp != helpNone {
 		t.Fatal("help should close on any key")
 	}
 	// from the focused results window
 	press(a, "enter", "?")
-	if !a.showHelp {
-		t.Fatal("? should open help in focused results")
+	if a.showHelp != helpResults {
+		t.Fatalf("? should open the results help in focused results, got %q", a.showHelp)
+	}
+	v = a.View()
+	for _, s := range []string{"yc", "yY", "ya", "Copier", "Navigation"} {
+		if !strings.Contains(v, s) {
+			t.Fatalf("results help missing %q", s)
+		}
 	}
 	press(a, "j")
-	if a.showHelp {
+	if a.showHelp != helpNone {
 		t.Fatal("help should close on any key")
 	}
 	if a.res.PendingKeys() != "" {
@@ -261,11 +336,21 @@ func TestResultsHelpOverlay(t *testing.T) {
 	}
 	// ? must not open help from the editor (it is a typed character)
 	press(a, "esc", "k", "enter", "i", "?")
-	if a.showHelp {
+	if a.showHelp != helpNone {
 		t.Fatal("? in editor insert mode must not open help")
 	}
 	if !strings.Contains(a.ed.Value(), "?") {
 		t.Fatalf("editor should contain '?', got %q", a.ed.Value())
+	}
+}
+
+func TestOpenConfigEditorShortcut(t *testing.T) {
+	a := newTestApp()
+	t.Setenv("EDITOR", "true") // /usr/bin/true: exits immediately
+	msg := tea.KeyMsg{Type: tea.KeyCtrlO}
+	_, cmd := a.Update(msg)
+	if cmd == nil {
+		t.Fatal("ctrl+o should return an ExecProcess command")
 	}
 }
 

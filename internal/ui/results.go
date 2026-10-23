@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
+
+	"pgak/internal/i18n"
 )
 
 // Results is a vim-navigable table of query results.
@@ -24,24 +27,31 @@ type Results struct {
 	pendingG bool
 	count    int // count prefix (0 = none)
 
+	searching                  bool   // typing in the / prompt
+	searchInput                string // text being typed
+	searchQuery                string // committed (or live) query
+	searchOrigRow, searchOrigCol int  // cursor position when / was pressed
+
 	width, height int
 	focused       bool
 
 	Status string // transient message (yank feedback), read by the app
 
-	headStyle lipgloss.Style
-	cellStyle lipgloss.Style
-	curStyle  lipgloss.Style
-	rowStyle  lipgloss.Style
-	dimStyle  lipgloss.Style
+	headStyle  lipgloss.Style
+	cellStyle  lipgloss.Style
+	curStyle   lipgloss.Style
+	rowStyle   lipgloss.Style
+	dimStyle   lipgloss.Style
+	matchStyle lipgloss.Style
 }
 
 func NewResults() *Results {
 	return &Results{
-		headStyle: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("150")),
-		curStyle:  lipgloss.NewStyle().Reverse(true).Bold(true),
-		rowStyle:  lipgloss.NewStyle().Background(lipgloss.Color("236")),
-		dimStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
+		headStyle:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("150")),
+		curStyle:   lipgloss.NewStyle().Reverse(true).Bold(true),
+		rowStyle:   lipgloss.NewStyle().Background(lipgloss.Color("236")),
+		dimStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
+		matchStyle: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("221")),
 	}
 }
 
@@ -59,6 +69,7 @@ func (r *Results) SetData(cols []string, rows [][]string) {
 	r.curRow, r.curCol = 0, 0
 	r.scrollRow, r.scrollCol = 0, 0
 	r.pendingY, r.pendingG = false, false
+	r.searching, r.searchInput, r.searchQuery = false, "", ""
 	r.widths = make([]int, len(cols))
 	for i, c := range cols {
 		r.widths[i] = clampInt(runewidth.StringWidth(c), minColWidth, maxColWidth)
@@ -90,6 +101,9 @@ func clampInt(v, lo, hi int) int {
 
 // PendingKeys shows pending multi-key state for the status bar.
 func (r *Results) PendingKeys() string {
+	if r.searching {
+		return "/" + r.searchInput + "▌"
+	}
 	s := ""
 	if r.count > 0 {
 		s += strconv.Itoa(r.count)
@@ -119,6 +133,11 @@ func (r *Results) Update(msg tea.KeyMsg) {
 	}
 	key := msg.String()
 	r.Status = ""
+
+	if r.searching {
+		r.updateSearch(msg)
+		return
+	}
 
 	if r.pendingY {
 		r.pendingY = false
@@ -154,6 +173,16 @@ func (r *Results) Update(msg tea.KeyMsg) {
 		r.pendingY = true
 		r.count = 0
 		return
+	case "/":
+		r.searching = true
+		r.searchInput = ""
+		r.searchOrigRow, r.searchOrigCol = r.curRow, r.curCol
+		r.count = 0
+		return
+	case "n":
+		r.jumpMatch(r.takeCount())
+	case "N":
+		r.jumpMatch(-r.takeCount())
 	case "h", "left":
 		r.curCol = clampInt(r.curCol-r.takeCount(), 0, len(r.Cols)-1)
 	case "l", "right":
@@ -225,30 +254,30 @@ func (r *Results) yank(key string) {
 	switch key {
 	case "y": // ligne
 		text = strings.Join(r.Rows[r.curRow], "\t")
-		what = "ligne"
+		what = i18n.T("yank.row")
 	case "Y", "r": // ligne avec noms de colonnes
 		text = strings.Join(r.Cols, "\t") + "\n" + strings.Join(r.Rows[r.curRow], "\t")
-		what = "ligne + en-têtes"
+		what = i18n.T("yank.rowheaders")
 	case "c": // cellule
 		text = r.cell(r.curRow, r.curCol)
-		what = "cellule"
+		what = i18n.T("yank.cell")
 	case "C": // cellule avec nom de colonne
 		text = r.Cols[r.curCol] + ": " + r.cell(r.curRow, r.curCol)
-		what = "cellule + colonne"
+		what = i18n.T("yank.cellcolumn")
 	case "o": // colonne entière
 		vals := make([]string, 0, len(r.Rows))
 		for i := range r.Rows {
 			vals = append(vals, r.cell(i, r.curCol))
 		}
 		text = strings.Join(vals, "\n")
-		what = "colonne"
+		what = i18n.T("yank.column")
 	case "O": // colonne avec en-tête
 		vals := []string{r.Cols[r.curCol]}
 		for i := range r.Rows {
 			vals = append(vals, r.cell(i, r.curCol))
 		}
 		text = strings.Join(vals, "\n")
-		what = "colonne + en-tête"
+		what = i18n.T("yank.columnheader")
 	case "a": // tout (TSV avec header)
 		var sb strings.Builder
 		sb.WriteString(strings.Join(r.Cols, "\t"))
@@ -257,15 +286,131 @@ func (r *Results) yank(key string) {
 			sb.WriteString(strings.Join(row, "\t"))
 		}
 		text = sb.String()
-		what = "tout le résultat"
+		what = i18n.T("yank.all")
 	default:
 		return
 	}
 	if err := clipboard.WriteAll(text); err != nil {
-		r.Status = "erreur presse-papier: " + err.Error()
+		r.Status = fmt.Sprintf(i18n.T("status.error.clipboard"), err.Error())
 		return
 	}
-	r.Status = "copié: " + what
+	r.Status = fmt.Sprintf(i18n.T("status.copied"), what)
+}
+
+// ------------------------------------------------------------------ search
+
+// updateSearch handles keys while the / prompt is open (incremental search).
+func (r *Results) updateSearch(msg tea.KeyMsg) {
+	switch msg.String() {
+	case "enter":
+		r.searching = false
+		r.searchQuery = r.searchInput
+		if r.searchQuery != "" && !r.searchFrom(r.searchOrigRow, r.searchOrigCol, true) {
+			r.Status = fmt.Sprintf(i18n.T("status.search.nomatch"), r.searchQuery)
+		}
+	case "esc":
+		r.searching = false
+		r.searchInput, r.searchQuery = "", ""
+		r.curRow, r.curCol = r.searchOrigRow, r.searchOrigCol
+		r.ensureVisible()
+	case "backspace":
+		if r.searchInput != "" {
+			rs := []rune(r.searchInput)
+			r.searchInput = string(rs[:len(rs)-1])
+		}
+		r.searchLive()
+	case "ctrl+u":
+		r.searchInput = ""
+		r.searchLive()
+	case " ", "space":
+		r.searchInput += " "
+		r.searchLive()
+	default:
+		if msg.Type == tea.KeyRunes {
+			r.searchInput += string(msg.Runes)
+			r.searchLive()
+		}
+	}
+}
+
+// searchLive updates the live query while typing and jumps to the first match
+// from the position where the search started.
+func (r *Results) searchLive() {
+	r.searchQuery = r.searchInput
+	if r.searchQuery == "" {
+		r.curRow, r.curCol = r.searchOrigRow, r.searchOrigCol
+		r.ensureVisible()
+		return
+	}
+	r.searchFrom(r.searchOrigRow, r.searchOrigCol, true)
+}
+
+// matchesSearch reports whether the cell contains the query (case-insensitive).
+func (r *Results) matchesSearch(row, col int) bool {
+	if r.searchQuery == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(r.cell(row, col)), strings.ToLower(r.searchQuery))
+}
+
+// searchFrom moves the cursor to the first match scanning row-major from
+// (row, col), wrapping around. inclusive includes the starting cell.
+func (r *Results) searchFrom(row, col int, inclusive bool) bool {
+	total := len(r.Rows) * len(r.Cols)
+	if total == 0 || r.searchQuery == "" {
+		return false
+	}
+	start := row*len(r.Cols) + col
+	if !inclusive {
+		start++
+	}
+	for i := 0; i < total; i++ {
+		idx := ((start+i)%total + total) % total
+		rr, cc := idx/len(r.Cols), idx%len(r.Cols)
+		if r.matchesSearch(rr, cc) {
+			r.curRow, r.curCol = rr, cc
+			r.ensureVisible()
+			return true
+		}
+	}
+	return false
+}
+
+// jumpMatch moves to the n-th next (dir > 0) or previous (dir < 0) match.
+func (r *Results) jumpMatch(dir int) {
+	if r.searchQuery == "" {
+		return
+	}
+	total := len(r.Rows) * len(r.Cols)
+	if total == 0 {
+		return
+	}
+	step := 1
+	count := dir
+	if dir < 0 {
+		step = -1
+		count = -dir
+	}
+	row, col := r.curRow, r.curCol
+	for ; count > 0; count-- {
+		start := row*len(r.Cols) + col
+		found := false
+		for i := 1; i <= total; i++ {
+			idx := ((start+step*i)%total + total) % total
+			rr, cc := idx/len(r.Cols), idx%len(r.Cols)
+			if r.matchesSearch(rr, cc) {
+				row, col = rr, cc
+				found = true
+				break
+			}
+		}
+		if !found {
+			r.Status = fmt.Sprintf(i18n.T("status.search.nomatch"), r.searchQuery)
+			return
+		}
+	}
+	r.curRow, r.curCol = row, col
+	r.ensureVisible()
 }
 
 func (r *Results) ensureVisible() {
@@ -296,7 +441,7 @@ func (r *Results) visibleWidth(a, b int) int {
 
 func (r *Results) View() string {
 	if r.Empty() {
-		return r.dimStyle.Render("Aucun résultat — exécutez une requête (ctrl+e)")
+		return r.dimStyle.Render(i18n.T("results.empty"))
 	}
 	var sb strings.Builder
 
@@ -329,9 +474,14 @@ func (r *Results) View() string {
 		var ln strings.Builder
 		for c := r.scrollCol; c < len(r.Cols); c++ {
 			cell := padCell(r.cell(idx, c), r.widths[c])
+			matched := r.matchesSearch(idx, c)
 			switch {
 			case r.focused && idx == r.curRow && c == r.curCol:
 				ln.WriteString(r.curStyle.Render(cell))
+			case matched && r.focused && idx == r.curRow:
+				ln.WriteString(r.matchStyle.Background(lipgloss.Color("236")).Render(cell))
+			case matched:
+				ln.WriteString(r.matchStyle.Render(cell))
 			case r.focused && idx == r.curRow:
 				ln.WriteString(r.rowStyle.Render(cell))
 			default:

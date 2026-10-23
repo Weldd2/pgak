@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"pgak/internal/i18n"
 	"pgak/internal/ui/editor"
 )
 
@@ -25,13 +26,10 @@ var (
 	dimText   = lipgloss.NewStyle().Foreground(colDim)
 	accText   = lipgloss.NewStyle().Foreground(colAccent)
 
-	modeStyles = map[string]lipgloss.Style{
-		"NORMAL":  lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("68")).Foreground(lipgloss.Color("231")).Padding(0, 1),
-		"INSERT":  lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("71")).Foreground(lipgloss.Color("231")).Padding(0, 1),
-		"VISUAL":  lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("176")).Foreground(lipgloss.Color("231")).Padding(0, 1),
-		"V-LINE":  lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("176")).Foreground(lipgloss.Color("231")).Padding(0, 1),
-		"FENÊTRE": lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("221")).Foreground(lipgloss.Color("235")).Padding(0, 1),
-	}
+	modeStyleNormal = lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("68")).Foreground(lipgloss.Color("231")).Padding(0, 1)
+	modeStyleInsert = lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("71")).Foreground(lipgloss.Color("231")).Padding(0, 1)
+	modeStyleVisual = lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("176")).Foreground(lipgloss.Color("231")).Padding(0, 1)
+	modeStyleWindow = lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("221")).Foreground(lipgloss.Color("235")).Padding(0, 1)
 )
 
 func zoneColor(z Zone) lipgloss.Color {
@@ -114,7 +112,7 @@ func (a *App) headerView(totalH int) string {
 
 	border, _ := a.borderStyleFor(ZoneHeader)
 
-	labels := []string{"Connexion", "Base", "Schéma"}
+	labels := []string{i18n.T("header.connection"), i18n.T("header.database"), i18n.T("header.schema")}
 	values := []string{orDash(a.connName), orDash(a.database), orDash(a.schema)}
 
 	if !focused {
@@ -140,7 +138,7 @@ func (a *App) headerView(totalH int) string {
 		boxes[i] = bs.Width(boxW).Render(content)
 	}
 	row := lipgloss.JoinHorizontal(lipgloss.Top, boxes...)
-	hint := dimText.Render(" h/l choisir · ↵ ouvrir · esc fenêtres")
+	hint := dimText.Render(i18n.T("header.hint"))
 	return border.Width(w + 2).Render(lipgloss.JoinVertical(lipgloss.Left, row, hint))
 }
 
@@ -179,16 +177,16 @@ func dimTopBorder(s string) string {
 
 func (a *App) View() string {
 	if a.width == 0 {
-		return "chargement…"
+		return i18n.T("status.loading")
 	}
 	headerH, edH, resH := a.zoneHeights()
 
 	header := a.headerView(headerH)
 
-	edTitle := "Requête (ctrl+e exécuter · ctrl+p historique)"
+	edTitle := i18n.T("editor.title")
 	editorBox := a.zoneBox(ZoneEditor, edTitle, a.ed.View(), edH)
 
-	resTitle := "Résultats"
+	resTitle := i18n.T("results.title")
 	if a.resInfo != "" {
 		resTitle += " · " + a.resInfo
 	}
@@ -197,12 +195,16 @@ func (a *App) View() string {
 	main := lipgloss.JoinVertical(lipgloss.Left, header, editorBox, resultsBox, a.statusBar())
 
 	// help overlay (?)
-	if a.showHelp {
+	if a.showHelp != helpNone {
+		content := resultsHelp()
+		if a.showHelp == helpWindow {
+			content = windowHelp()
+		}
 		box := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colGreen).
 			Padding(0, 2).
-			Render(resultsHelp())
+			Render(content)
 		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, box)
 	}
 
@@ -229,56 +231,93 @@ func (a *App) View() string {
 func resultsHelp() string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(colGreen)
 	section := lipgloss.NewStyle().Bold(true).Foreground(colAccent)
-	key := accText
 	lines := []string{
-		title.Render("Résultats — aide"),
+		title.Render(i18n.T("results.help.title")),
 		"",
-		section.Render("Navigation"),
-		"  " + key.Render("h j k l / flèches") + "  se déplacer (cellule)",
-		"  " + key.Render("0 / $            ") + "  première / dernière colonne",
-		"  " + key.Render("w / b            ") + "  colonne suivante / précédente",
-		"  " + key.Render("gg / G           ") + "  première / dernière ligne (42G, 5gg : ligne n)",
-		"  " + key.Render("ctrl+d / ctrl+u  ") + "  demi-page bas / haut",
-		"  " + key.Render("ctrl+f / ctrl+b  ") + "  page bas / haut",
-		"  " + key.Render("H / M / L        ") + "  haut / milieu / bas de l'écran",
-		"  " + key.Render("10j, 3l, …       ") + "  compteurs sur les mouvements",
+		section.Render(i18n.T("results.help.navigation")),
+		i18n.T("results.help.nav.move"),
+		i18n.T("results.help.nav.first"),
+		i18n.T("results.help.nav.word"),
+		i18n.T("results.help.nav.line"),
+		i18n.T("results.help.nav.halfpage"),
+		i18n.T("results.help.nav.page"),
+		i18n.T("results.help.nav.screen"),
+		i18n.T("results.help.nav.count"),
 		"",
-		section.Render("Copier (presse-papier système)"),
-		"  " + key.Render("yc") + "  cellule",
-		"  " + key.Render("yC") + "  cellule avec nom de colonne (col: valeur)",
-		"  " + key.Render("yy") + "  ligne courante (TSV)",
-		"  " + key.Render("yY") + "  ligne courante + en-têtes",
-		"  " + key.Render("yo") + "  colonne entière",
-		"  " + key.Render("yO") + "  colonne entière + en-tête",
-		"  " + key.Render("ya") + "  tout le résultat (TSV avec en-têtes)",
+		section.Render(i18n.T("results.help.copy")),
+		i18n.T("results.help.copy.cell"),
+		i18n.T("results.help.copy.cellcol"),
+		i18n.T("results.help.copy.row"),
+		i18n.T("results.help.copy.rowhead"),
+		i18n.T("results.help.copy.column"),
+		i18n.T("results.help.copy.columnhead"),
+		i18n.T("results.help.copy.all"),
 		"",
-		section.Render("Divers"),
-		"  " + key.Render("esc") + "  revenir au mode fenêtres    " + key.Render("q") + "  quitter",
+		section.Render(i18n.T("results.help.search")),
+		i18n.T("results.help.search.start"),
+		i18n.T("results.help.search.next"),
 		"",
-		dimText.Render("appuyez sur une touche pour fermer"),
+		section.Render(i18n.T("results.help.misc")),
+		i18n.T("results.help.misc.esc"),
+		"",
+		dimText.Render(i18n.T("results.help.close")),
+	}
+	return strings.Join(lines, "\n")
+}
+
+// windowHelp is the cheat sheet shown with "?" in window-selection mode.
+func windowHelp() string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(colGreen)
+	section := lipgloss.NewStyle().Bold(true).Foreground(colAccent)
+	lines := []string{
+		title.Render(i18n.T("window.help.title")),
+		"",
+		section.Render(i18n.T("window.help.navigation")),
+		i18n.T("window.help.nav.move"),
+		i18n.T("window.help.nav.focus"),
+		i18n.T("window.help.nav.cycle"),
+		"",
+		section.Render(i18n.T("window.help.global")),
+		i18n.T("window.help.global.exec"),
+		i18n.T("window.help.global.history"),
+		i18n.T("window.help.global.actions"),
+		i18n.T("window.help.global.config"),
+		i18n.T("window.help.global.quit"),
+		"",
+		dimText.Render(i18n.T("results.help.close")),
 	}
 	return strings.Join(lines, "\n")
 }
 
 func (a *App) statusBar() string {
 	inModal := a.form != nil || a.modal != nil
-	mode := "NORMAL"
+	var mode string
+	var modeStyle lipgloss.Style
 	switch {
 	case a.form != nil && a.form.InsertMode(),
 		a.modal != nil && a.modal.InsertMode():
-		mode = "INSERT"
+		mode = i18n.T("mode.insert")
+		modeStyle = modeStyleInsert
 	case inModal:
-		mode = "NORMAL"
+		mode = i18n.T("mode.normal")
+		modeStyle = modeStyleNormal
 	case !a.focused:
-		mode = "FENÊTRE"
+		mode = i18n.T("mode.window")
+		modeStyle = modeStyleWindow
 	case a.zone == ZoneEditor && a.ed.Mode() == editor.Insert:
-		mode = "INSERT"
+		mode = i18n.T("mode.insert")
+		modeStyle = modeStyleInsert
 	case a.zone == ZoneEditor && a.ed.Mode() == editor.Visual:
-		mode = "VISUAL"
+		mode = i18n.T("mode.visual")
+		modeStyle = modeStyleVisual
 	case a.zone == ZoneEditor && a.ed.Mode() == editor.VisualLine:
-		mode = "V-LINE"
+		mode = i18n.T("mode.vline")
+		modeStyle = modeStyleVisual
+	default:
+		mode = i18n.T("mode.normal")
+		modeStyle = modeStyleNormal
 	}
-	left := modeStyles[mode].Render(mode)
+	left := modeStyle.Render(mode)
 
 	pending := ""
 	if a.focused && !inModal {
@@ -301,14 +340,14 @@ func (a *App) statusBar() string {
 		msg = "⏳ " + msg
 	}
 
-	hints := "esc fenêtres · ctrl+t actions · ctrl+c quitter"
+	hints := i18n.T("statusbar.hints.default")
 	switch {
 	case inModal:
-		hints = "ctrl+t actions · ctrl+c quitter"
+		hints = i18n.T("statusbar.hints.modal")
 	case !a.focused:
-		hints = "hjkl naviguer · ↵ focus · ctrl+t actions · q quitter"
+		hints = i18n.T("statusbar.hints.window")
 	case a.zone == ZoneResults:
-		hints = "? aide · y y/Y/c/C/o/O/a copier · " + hints
+		hints = i18n.T("statusbar.hints.results") + hints
 	}
 
 	space := a.width - lipgloss.Width(left) - lipgloss.Width(msg) - len(hints) - 4

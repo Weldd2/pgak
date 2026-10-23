@@ -5,6 +5,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"pgak/internal/i18n"
 )
 
 // SelectItem is an entry of a searchable select list.
@@ -192,10 +194,10 @@ func (m *SelectModal) View() string {
 
 	prompt := "/ "
 	cursor := " "
-	mode := m.dimStyle.Render("[normal]")
+	mode := m.dimStyle.Render(i18n.T("modal.normal"))
 	if m.insert {
 		cursor = m.curStyle.Render(" ")
-		mode = m.qStyle.Render("[recherche]")
+		mode = m.qStyle.Render(i18n.T("modal.search"))
 	}
 	sb.WriteString(prompt + m.query + cursor + " " + mode)
 	sb.WriteByte('\n')
@@ -222,11 +224,11 @@ func (m *SelectModal) View() string {
 	}
 
 	sb.WriteByte('\n')
-	foot := "↵ choisir · esc "
+	foot := i18n.T("modal.hint.select")
 	if m.insert {
-		foot += "mode normal"
+		foot += i18n.T("modal.hint.normalmode")
 	} else {
-		foot += "fermer · / rechercher"
+		foot += i18n.T("modal.hint.close")
 	}
 	if m.Actions != nil && !m.insert {
 		for k, label := range m.Actions {

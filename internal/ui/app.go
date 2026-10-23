@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"pgak/internal/config"
 	"pgak/internal/db"
 	"pgak/internal/history"
+	"pgak/internal/i18n"
 	"pgak/internal/ui/editor"
 )
 
@@ -27,12 +29,20 @@ const (
 
 // modal purposes
 const (
-	purpConn    = "conn"
-	purpDB      = "db"
-	purpSchema  = "schema"
-	purpHistory = "history"
-	purpQuick   = "quick"
-	purpTable   = "table"
+	purpConn     = "conn"
+	purpDB       = "db"
+	purpSchema   = "schema"
+	purpHistory  = "history"
+	purpQuick    = "quick"
+	purpTable    = "table"
+	purpLanguage = "language"
+)
+
+// help overlay kinds (showHelp)
+const (
+	helpNone    = ""
+	helpResults = "results"
+	helpWindow  = "window"
 )
 
 type App struct {
@@ -58,7 +68,7 @@ type App struct {
 	modalPurp   string
 	tableAction string // pending quick action needing a table
 	form        *ConnForm
-	showHelp    bool // results help overlay (?)
+	showHelp    string // help overlay (?): helpNone, helpResults or helpWindow
 
 	initialConn string // --connexion or restored session: connect at startup
 	initialDB   string // database to open at startup (restored session)
@@ -126,14 +136,20 @@ func (a *App) quit() (tea.Model, tea.Cmd) {
 }
 
 func (a *App) Init() tea.Cmd {
+	// First launch: ask for language
+	if a.cfg.Language == "" {
+		a.openLanguageModal()
+		return nil
+	}
+
 	// --connexion or restored session: connect right away
 	if a.initialConn != "" {
 		if c, ok := a.cfg.Get(a.initialConn); ok {
 			a.busy = true
-			a.setOK("connexion à " + c.Name + "…")
+			a.setOK(fmt.Sprintf(i18n.T("status.connecting"), c.Name))
 			return connectCmd(c, a.initialDB)
 		}
-		a.setErr("connexion inconnue : « " + a.initialConn + " »")
+		a.setErr(fmt.Sprintf(i18n.T("status.error.unknown"), a.initialConn))
 	}
 	// open the connection selector right away (or the form if none saved)
 	if len(a.cfg.Connections) == 0 {
@@ -166,13 +182,17 @@ type tablesMsg struct {
 	err    error
 }
 
+type editorFinishedMsg struct {
+	err error
+}
+
 func connectCmd(c config.Connection, database string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		log.Printf("connexion: name=%s host=%s port=%d user=%s db=%s sslmode=%s password_env=%s",
 			c.Name, c.Host, c.Port, c.User, database, c.SSLMode, c.PasswordEnv)
 		if c.PasswordEnv != "" && os.Getenv(c.PasswordEnv) == "" {
-			err := fmt.Errorf("la variable d'env « %s » est vide ou non définie — ce champ attend le NOM d'une variable (ex: PGAK_DB_PASSWORD), pas le mot de passe", c.PasswordEnv)
+			err := fmt.Errorf(i18n.T("status.error.envvar"), c.PasswordEnv)
 			log.Printf("connexion: %v", err)
 			return connectedMsg{connName: c.Name, err: err}
 		}
@@ -252,7 +272,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		a.updateBanner()
-		a.setOK(fmt.Sprintf("connecté à %s/%s", msg.connName, a.database))
+		a.setOK(fmt.Sprintf(i18n.T("status.connected"), msg.connName, a.database))
 		return a, nil
 
 	case queryDoneMsg:
@@ -262,11 +282,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.res.SetData(msg.res.Columns, msg.res.Rows)
-		a.resInfo = fmt.Sprintf("%d ligne(s) · %s", len(msg.res.Rows), msg.res.Duration.Round(time.Millisecond))
+		a.resInfo = fmt.Sprintf(i18n.T("results.info.rows"), len(msg.res.Rows), msg.res.Duration.Round(time.Millisecond))
 		if !msg.res.IsSelect {
-			a.resInfo = fmt.Sprintf("%d ligne(s) affectée(s) · %s", msg.res.Affected, msg.res.Duration.Round(time.Millisecond))
+			a.resInfo = fmt.Sprintf(i18n.T("results.info.affected"), msg.res.Affected, msg.res.Duration.Round(time.Millisecond))
 		}
-		a.setOK("requête exécutée")
+		a.setOK(i18n.T("status.executed"))
 		a.hist.Add(msg.query, a.connName, a.database)
 		_ = a.hist.Save()
 		a.zone = ZoneResults
@@ -285,7 +305,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items[i] = SelectItem{Label: t, Value: t}
 		}
 		a.tableAction = msg.action
-		a.openModal(purpTable, "Tables de "+a.schema, items)
+		a.openModal(purpTable, fmt.Sprintf(i18n.T("modal.tables"), a.schema), items)
+		return a, nil
+
+	case editorFinishedMsg:
+		if msg.err != nil {
+			a.setErr(fmt.Sprintf(i18n.T("status.error.editor"), msg.err))
+			return a, nil
+		}
+		// reload the config edited externally (connections, language)
+		if cfg, err := config.Load(); err == nil {
+			*a.cfg = *cfg
+			if a.cfg.Language != "" {
+				i18n.SetLanguage(a.cfg.Language)
+			}
+		}
+		a.setOK(i18n.T("status.configreloaded"))
 		return a, nil
 
 	case tea.KeyMsg:
@@ -311,8 +346,8 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// ----- help overlay: any key closes it
-	if a.showHelp {
-		a.showHelp = false
+	if a.showHelp != helpNone {
+		a.showHelp = helpNone
 		return a, nil
 	}
 
@@ -323,9 +358,9 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if !res.Canceled {
 				a.cfg.Upsert(res.OldName, res.Conn)
 				if err := a.cfg.Save(); err != nil {
-					a.setErr("sauvegarde config : " + err.Error())
+					a.setErr(fmt.Sprintf(i18n.T("status.error.configsave"), err.Error()))
 				} else {
-					a.setOK("connexion « " + res.Conn.Name + " » enregistrée")
+					a.setOK(fmt.Sprintf(i18n.T("status.saved"), res.Conn.Name))
 				}
 				// reconnect if we edited the active connection
 				if res.OldName != "" && res.OldName == a.connName {
@@ -362,6 +397,8 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+t":
 		a.openQuickActions()
 		return a, nil
+	case "ctrl+o":
+		return a.openConfigEditor()
 	case "ctrl+j":
 		a.setZone((a.zone + 1) % zoneCount)
 		return a, nil
@@ -404,9 +441,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "3":
 			a.setZone(ZoneResults)
 		case "?":
-			if a.zone == ZoneResults {
-				a.showHelp = true
-			}
+			a.showHelp = helpWindow
 		case "q", "esc":
 			if key == "q" {
 				return a.quit()
@@ -441,7 +476,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// ? shows the results help (navigation + copy)
 	if key == "?" && a.zone == ZoneResults && a.res.PendingKeys() == "" {
-		a.showHelp = true
+		a.showHelp = helpResults
 		return a, nil
 	}
 
@@ -500,16 +535,16 @@ func (a *App) handleHeaderKey(key string) {
 
 func (a *App) runQuery() (tea.Model, tea.Cmd) {
 	if a.client == nil {
-		a.setErr("aucune connexion active (zone connexion → ↵)")
+		a.setErr(i18n.T("status.error.noconn"))
 		return a, nil
 	}
 	sql := strings.TrimSpace(a.ed.Value())
 	if sql == "" {
-		a.setErr("requête vide")
+		a.setErr(i18n.T("status.error.emptyquery"))
 		return a, nil
 	}
 	a.busy = true
-	a.setOK("exécution…")
+	a.setOK(i18n.T("status.executing"))
 	return a, queryCmd(a.client, a.schema, sql)
 }
 
@@ -539,32 +574,32 @@ func (a *App) openConnModal() {
 			Value: c.Name,
 		}
 	}
-	a.openModal(purpConn, "Connexions", items)
-	a.modal.Actions = map[string]string{"e": "éditer", "n": "nouvelle", "x": "supprimer"}
+	a.openModal(purpConn, i18n.T("modal.connections"), items)
+	a.modal.Actions = map[string]string{"e": i18n.T("modal.actions.edit"), "n": i18n.T("modal.actions.new"), "x": i18n.T("modal.actions.delete")}
 }
 
 func (a *App) openDBModal() {
 	if a.client == nil {
-		a.setErr("connectez-vous d'abord")
+		a.setErr(i18n.T("status.error.connectfirst"))
 		return
 	}
 	items := make([]SelectItem, len(a.databases))
 	for i, d := range a.databases {
 		items[i] = SelectItem{Label: d, Value: d}
 	}
-	a.openModal(purpDB, "Bases de données", items)
+	a.openModal(purpDB, i18n.T("modal.databases"), items)
 }
 
 func (a *App) openSchemaModal() {
 	if a.client == nil {
-		a.setErr("connectez-vous d'abord")
+		a.setErr(i18n.T("status.error.connectfirst"))
 		return
 	}
 	items := make([]SelectItem, len(a.schemas))
 	for i, s := range a.schemas {
 		items[i] = SelectItem{Label: s, Value: s}
 	}
-	a.openModal(purpSchema, "Schémas", items)
+	a.openModal(purpSchema, i18n.T("modal.schemas"), items)
 }
 
 func (a *App) openHistoryModal() {
@@ -577,22 +612,54 @@ func (a *App) openHistoryModal() {
 			Value: e.Query,
 		})
 	}
-	a.openModal(purpHistory, "Historique des requêtes", items)
+	a.openModal(purpHistory, i18n.T("modal.history"), items)
+}
+
+func (a *App) openLanguageModal() {
+	items := []SelectItem{
+		{Label: i18n.T("language.english"), Desc: "English", Value: "en"},
+		{Label: i18n.T("language.french"), Desc: "Français", Value: "fr"},
+	}
+	a.openModal(purpLanguage, i18n.T("language.select"), items)
 }
 
 func (a *App) openQuickActions() {
 	items := []SelectItem{
-		{Label: "Rechercher une table", Desc: "SELECT * … LIMIT 100", Value: "table:select"},
-		{Label: "Colonnes d'une table", Desc: "types, null, défauts", Value: "table:columns"},
-		{Label: "Compter les lignes d'une table", Desc: "SELECT count(*)", Value: "table:count"},
-		{Label: "Index d'une table", Desc: "pg_indexes", Value: "table:indexes"},
-		{Label: "Lister les tables du schéma", Desc: a.schema, Value: "sql:tables"},
-		{Label: "Taille des tables", Desc: "pg_total_relation_size", Value: "sql:sizes"},
-		{Label: "Connexions actives", Desc: "pg_stat_activity", Value: "sql:activity"},
-		{Label: "Requêtes lentes en cours", Desc: "> 5 secondes", Value: "sql:slow"},
-		{Label: "Éditer les connexions", Desc: "config " + configPathHint(), Value: "connections"},
+		{Label: i18n.T("quickaction.tablesearch"), Desc: i18n.T("quickaction.tablesearch.desc"), Value: "table:select"},
+		{Label: i18n.T("quickaction.columns"), Desc: i18n.T("quickaction.columns.desc"), Value: "table:columns"},
+		{Label: i18n.T("quickaction.count"), Desc: i18n.T("quickaction.count.desc"), Value: "table:count"},
+		{Label: i18n.T("quickaction.indexes"), Desc: i18n.T("quickaction.indexes.desc"), Value: "table:indexes"},
+		{Label: i18n.T("quickaction.listtables"), Desc: fmt.Sprintf(i18n.T("quickaction.listtables.desc"), a.schema), Value: "sql:tables"},
+		{Label: i18n.T("quickaction.sizes"), Desc: i18n.T("quickaction.sizes.desc"), Value: "sql:sizes"},
+		{Label: i18n.T("quickaction.activity"), Desc: i18n.T("quickaction.activity.desc"), Value: "sql:activity"},
+		{Label: i18n.T("quickaction.slow"), Desc: i18n.T("quickaction.slow.desc"), Value: "sql:slow"},
+		{Label: i18n.T("quickaction.language"), Desc: i18n.T("quickaction.language.desc"), Value: "language"},
+		{Label: i18n.T("quickaction.configlocation"), Desc: fmt.Sprintf(i18n.T("quickaction.configlocation.desc"), configPathHint()), Value: "config:location"},
+		{Label: i18n.T("quickaction.editconfig"), Desc: i18n.T("quickaction.editconfig.desc"), Value: "config:edit"},
+		{Label: i18n.T("quickaction.editconns"), Desc: fmt.Sprintf(i18n.T("quickaction.editconns.desc"), configPathHint()), Value: "connections"},
 	}
-	a.openModal(purpQuick, "Quick actions", items)
+	a.openModal(purpQuick, i18n.T("modal.quickactions"), items)
+}
+
+// openConfigEditor suspends the TUI and opens the config file in $EDITOR
+// (then $VISUAL, then vi). The config is reloaded when the editor exits.
+func (a *App) openConfigEditor() (tea.Model, tea.Cmd) {
+	p, err := config.Path()
+	if err != nil {
+		a.setErr(fmt.Sprintf(i18n.T("status.error.editor"), err))
+		return a, nil
+	}
+	ed := os.Getenv("EDITOR")
+	if ed == "" {
+		ed = os.Getenv("VISUAL")
+	}
+	if ed == "" {
+		ed = "vi"
+	}
+	c := exec.Command(ed, p)
+	return a, tea.ExecProcess(c, func(err error) tea.Msg {
+		return editorFinishedMsg{err: err}
+	})
 }
 
 func configPathHint() string {
@@ -630,9 +697,9 @@ func (a *App) handleModalResult(res *SelectResult) (tea.Model, tea.Cmd) {
 				name := res.Item.Value.(string)
 				a.cfg.Delete(name)
 				if err := a.cfg.Save(); err != nil {
-					a.setErr("sauvegarde config : " + err.Error())
+					a.setErr(fmt.Sprintf(i18n.T("status.error.configsave"), err.Error()))
 				} else {
-					a.setOK("connexion « " + name + " » supprimée")
+					a.setOK(fmt.Sprintf(i18n.T("status.deleted"), name))
 				}
 				a.openConnModal()
 			}
@@ -641,7 +708,7 @@ func (a *App) handleModalResult(res *SelectResult) (tea.Model, tea.Cmd) {
 				name := res.Item.Value.(string)
 				if c, ok := a.cfg.Get(name); ok {
 					a.busy = true
-					a.setOK("connexion à " + name + "…")
+					a.setOK(fmt.Sprintf(i18n.T("status.connecting"), name))
 					return a, connectCmd(c, "")
 				}
 			}
@@ -652,7 +719,7 @@ func (a *App) handleModalResult(res *SelectResult) (tea.Model, tea.Cmd) {
 			dbName := res.Item.Value.(string)
 			if c, ok := a.cfg.Get(a.connName); ok {
 				a.busy = true
-				a.setOK("connexion à " + dbName + "…")
+				a.setOK(fmt.Sprintf(i18n.T("status.connecting"), dbName))
 				return a, connectCmd(c, dbName)
 			}
 		}
@@ -661,7 +728,7 @@ func (a *App) handleModalResult(res *SelectResult) (tea.Model, tea.Cmd) {
 		if res.HasItem {
 			a.schema = res.Item.Value.(string)
 			a.updateBanner()
-			a.setOK("schéma : " + a.schema)
+			a.setOK(fmt.Sprintf("%s: %s", i18n.T("header.schema"), a.schema))
 		}
 
 	case purpHistory:
@@ -680,17 +747,48 @@ func (a *App) handleModalResult(res *SelectResult) (tea.Model, tea.Cmd) {
 		if res.HasItem {
 			return a.handleTablePicked(res.Item.Value.(string))
 		}
+
+	case purpLanguage:
+		if res.HasItem {
+			lang := res.Item.Value.(string)
+			i18n.SetLanguage(lang)
+			a.cfg.Language = lang
+			if err := a.cfg.Save(); err != nil {
+				a.setErr(fmt.Sprintf(i18n.T("status.error.configsave"), err.Error()))
+			} else {
+				a.setOK(i18n.T("language.changed"))
+			}
+			// If this was the first launch (no connections yet), open the connection form/modal
+			if a.client == nil && a.modal == nil && a.form == nil {
+				if len(a.cfg.Connections) == 0 {
+					a.form = NewConnForm(nil)
+				} else {
+					a.openConnModal()
+				}
+			}
+		}
 	}
 	return a, nil
 }
 
 func (a *App) handleQuickAction(action string) (tea.Model, tea.Cmd) {
-	if action == "connections" {
+	switch action {
+	case "connections":
 		a.openConnModal()
 		return a, nil
+	case "language":
+		a.openLanguageModal()
+		return a, nil
+	case "config:location":
+		if p := configPathHint(); p != "" {
+			a.setOK(fmt.Sprintf(i18n.T("quickaction.configlocation.desc"), p))
+		}
+		return a, nil
+	case "config:edit":
+		return a.openConfigEditor()
 	}
 	if a.client == nil {
-		a.setErr("connectez-vous d'abord")
+		a.setErr(i18n.T("status.error.connectfirst"))
 		return a, nil
 	}
 	switch action {
@@ -759,5 +857,5 @@ func (a *App) updateBanner() {
 		a.ed.SetBanner("")
 		return
 	}
-	a.ed.SetBanner(fmt.Sprintf("  SET search_path TO %s;  -- appliqué automatiquement (schéma sélectionné)", a.schema))
+	a.ed.SetBanner(fmt.Sprintf(i18n.T("editor.banner"), a.schema))
 }

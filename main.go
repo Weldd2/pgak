@@ -13,45 +13,46 @@ import (
 
 	"pgak/internal/config"
 	"pgak/internal/history"
+	"pgak/internal/i18n"
 	"pgak/internal/ui"
 )
 
 func usage() {
+	// Load config to determine language for help text
+	if cfg, err := config.Load(); err == nil && cfg.Language != "" {
+		i18n.SetLanguage(cfg.Language)
+	} else {
+		i18n.SetLanguage("en") // default to English
+	}
+
 	cfgPath, _ := config.Path()
 	histPath, _ := config.HistoryPath()
 	logPath, _ := config.LogPath()
 	sessPath, _ := config.SessionPath()
-	fmt.Fprintf(os.Stderr, `pgak — TUI pour naviguer simplement dans PostgreSQL (multi-environnements)
 
-Usage :
-  pgak [options]
-
-Par défaut, pgak rouvre dans l'état de la dernière fermeture : même connexion,
-même base, même schéma, et la requête de l'éditeur est conservée.
-
-Options :
-  --connexion <nom>   se connecte au lancement à la connexion enregistrée <nom>
-                      (prioritaire sur la session restaurée · alias : -c <nom>)
-  --help, -h          affiche cette aide
-
-Fichiers :
-  config      %s
-  historique  %s
-  session     %s
-  logs        %s
-
-Dans l'application :
-  hjkl / 1 2 3        naviguer entre les fenêtres · ↵ pour prendre le focus
-  esc                 revenir au mode fenêtres (en insert : retour au mode normal)
-  ctrl+e / F5         exécuter la requête
-  ctrl+p              historique des requêtes
-  ctrl+t              quick actions (tables, colonnes, tailles, activité…)
-  ?                   aide de la fenêtre résultats (navigation, copies)
-  q / ctrl+c          quitter
-
-Mots de passe : jamais stockés — le champ « Mot de passe (var env) » attend le
-NOM d'une variable d'environnement (ex : PGAK_DB_PASSWORD).
-`, cfgPath, histPath, sessPath, logPath)
+	fmt.Fprintf(os.Stderr, "%s\n\n", i18n.T("help.title"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.usage"))
+	fmt.Fprintf(os.Stderr, "%s\n\n", i18n.T("help.usage.cmd"))
+	fmt.Fprintf(os.Stderr, "%s\n\n", i18n.T("help.default"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.options"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.option.connection"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.option.connection2"))
+	fmt.Fprintf(os.Stderr, "%s\n\n", i18n.T("help.option.help"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.files"))
+	fmt.Fprintf(os.Stderr, i18n.T("help.file.config")+"\n", cfgPath)
+	fmt.Fprintf(os.Stderr, i18n.T("help.file.history")+"\n", histPath)
+	fmt.Fprintf(os.Stderr, i18n.T("help.file.session")+"\n", sessPath)
+	fmt.Fprintf(os.Stderr, i18n.T("help.file.logs")+"\n\n", logPath)
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.inapp"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.inapp.nav"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.inapp.esc"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.inapp.exec"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.inapp.history"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.inapp.actions"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.inapp.config"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.inapp.help"))
+	fmt.Fprintf(os.Stderr, "%s\n\n", i18n.T("help.inapp.quit"))
+	fmt.Fprintf(os.Stderr, "%s\n", i18n.T("help.passwords"))
 }
 
 func setupLog() func() {
@@ -87,17 +88,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	// set language (defaults to English if not specified)
+	lang := cfg.Language
+	if lang == "" {
+		lang = "en"
+		cfg.Language = "en"
+	}
+	i18n.SetLanguage(lang)
+
 	if connName != "" {
 		if _, ok := cfg.Get(connName); !ok {
 			names := make([]string, len(cfg.Connections))
 			for i, c := range cfg.Connections {
 				names[i] = c.Name
 			}
-			fmt.Fprintf(os.Stderr, "pgak: connexion inconnue « %s »\n", connName)
+			fmt.Fprintf(os.Stderr, i18n.T("cli.error.unknown_connection")+"\n", connName)
 			if len(names) > 0 {
-				fmt.Fprintf(os.Stderr, "connexions disponibles : %s\n", strings.Join(names, ", "))
+				fmt.Fprintf(os.Stderr, i18n.T("cli.error.available_connections")+"\n", strings.Join(names, ", "))
 			} else {
-				fmt.Fprintln(os.Stderr, "aucune connexion enregistrée — lancez pgak pour en créer une")
+				fmt.Fprintln(os.Stderr, i18n.T("cli.error.no_connections"))
 			}
 			os.Exit(1)
 		}

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"pgak/internal/config"
+	"pgak/internal/i18n"
 )
 
 // ConnForm is a classic form to create/edit a connection.
@@ -58,20 +60,20 @@ func NewConnForm(old *config.Connection) *ConnForm {
 		f.OldName = old.Name
 	}
 	f.fields = []formField{
-		{"Nom", c.Name, "prod",
-			"Nom affiché dans la liste des connexions"},
-		{"Host", c.Host, "localhost",
-			"Hôte du serveur postgres (container docker : vérifier le port mappé)"},
-		{"Port", strconv.Itoa(defaultPort(c.Port)), "5432",
-			"Port TCP (docker : le port *externe*, ex. 5434 pour 5434->5432)"},
-		{"User", c.User, "postgres",
-			"Utilisateur postgres"},
-		{"Mot de passe (var env)", c.PasswordEnv, "PGAK_DB_PASSWORD",
-			"⚠ PAS le mot de passe ! Le NOM d'une variable d'env qui le contient.\n   Ex: PGAK_DB_PASSWORD puis → fish: set -x PGAK_DB_PASSWORD monmdp\n   (bash/zsh: export PGAK_DB_PASSWORD=monmdp) · vide = pas de mot de passe"},
-		{"Database", c.Database, "postgres",
-			"Base par défaut à l'ouverture (vide = postgres)"},
-		{"SSL mode", defaultStr(c.SSLMode, "prefer"), "prefer",
-			"disable · prefer · require · verify-ca · verify-full"},
+		{i18n.T("form.field.name"), c.Name, i18n.T("form.placeholder.name"),
+			i18n.T("form.desc.name")},
+		{i18n.T("form.field.host"), c.Host, i18n.T("form.placeholder.host"),
+			i18n.T("form.desc.host")},
+		{i18n.T("form.field.port"), strconv.Itoa(defaultPort(c.Port)), i18n.T("form.placeholder.port"),
+			i18n.T("form.desc.port")},
+		{i18n.T("form.field.user"), c.User, i18n.T("form.placeholder.user"),
+			i18n.T("form.desc.user")},
+		{i18n.T("form.field.password"), c.PasswordEnv, i18n.T("form.placeholder.password"),
+			i18n.T("form.desc.password")},
+		{i18n.T("form.field.database"), c.Database, i18n.T("form.placeholder.database"),
+			i18n.T("form.desc.database")},
+		{i18n.T("form.field.sslmode"), defaultStr(c.SSLMode, "prefer"), i18n.T("form.placeholder.sslmode"),
+			i18n.T("form.desc.sslmode")},
 	}
 	return f
 }
@@ -97,7 +99,7 @@ func (f *ConnForm) InsertMode() bool { return f.insert }
 func (f *ConnForm) connection() (config.Connection, string) {
 	port, err := strconv.Atoi(strings.TrimSpace(f.fields[2].value))
 	if err != nil || port <= 0 {
-		return config.Connection{}, "port invalide"
+		return config.Connection{}, i18n.T("form.error.invalidport")
 	}
 	c := config.Connection{
 		Name:        strings.TrimSpace(f.fields[0].value),
@@ -109,13 +111,13 @@ func (f *ConnForm) connection() (config.Connection, string) {
 		SSLMode:     strings.TrimSpace(f.fields[6].value),
 	}
 	if c.Name == "" {
-		return c, "le nom est requis"
+		return c, i18n.T("form.error.namerequired")
 	}
 	if c.Host == "" {
-		return c, "le host est requis"
+		return c, i18n.T("form.error.hostrequired")
 	}
 	if c.User == "" {
-		return c, "le user est requis"
+		return c, i18n.T("form.error.userrequired")
 	}
 	return c, ""
 }
@@ -183,9 +185,9 @@ func (f *ConnForm) Update(msg tea.KeyMsg) *FormResult {
 
 func (f *ConnForm) View() string {
 	var sb strings.Builder
-	title := "Nouvelle connexion"
+	title := i18n.T("form.title.new")
 	if f.OldName != "" {
-		title = "Édition : " + f.OldName
+		title = fmt.Sprintf(i18n.T("form.title.edit"), f.OldName)
 	}
 	sb.WriteString(f.titleStyle.Render(title))
 	sb.WriteString("\n\n")
@@ -218,9 +220,9 @@ func (f *ConnForm) View() string {
 		sb.WriteString(f.errStyle.Render("✗ " + f.Err))
 		sb.WriteByte('\n')
 	}
-	hint := "j/k naviguer · i éditer · ctrl+s sauvegarder · esc fermer"
+	hint := i18n.T("form.hint.normal")
 	if f.insert {
-		hint = "esc mode normal · ↵/tab champ suivant · ctrl+s sauvegarder"
+		hint = i18n.T("form.hint.insert")
 	}
 	sb.WriteString(f.dimStyle.Render(hint))
 	return sb.String()

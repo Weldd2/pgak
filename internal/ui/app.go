@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -62,7 +63,10 @@ type App struct {
 	headerSel int  // 0 connexion, 1 database, 2 schema
 
 	ed  *editor.Editor
-	res *Results
+	res *Results // results of the current tab (an empty table before any run)
+
+	tabs   []*resultTab // one tab per statement of the last run
+	curTab int
 
 	modal       *SelectModal
 	modalPurp   string
@@ -171,10 +175,17 @@ type connectedMsg struct {
 	err       error
 }
 
+// stmtResult is the outcome of one statement of a multi-statement run.
+type stmtResult struct {
+	sql string
+	res *db.Result
+	err error
+}
+
 type queryDoneMsg struct {
-	res   *db.Result
-	query string
-	err   error
+	query   string       // full editor text (for the history)
+	results []stmtResult // one per statement, in order
+	err     error        // global failure (search_path), nothing was run
 }
 
 type tablesMsg struct {
@@ -185,6 +196,33 @@ type tablesMsg struct {
 
 type editorFinishedMsg struct {
 	err error
+}
+
+// cellUpdatedMsg is the outcome of a cell edition (UPDATE on the source table).
+type cellUpdatedMsg struct {
+	tab     *resultTab
+	col     int
+	keyCols []int    // result columns holding the primary key
+	keyVals []string // key of the updated row
+	value   string   // stored value as rendered by the server
+	column  string   // table column name
+	err     error
+}
+
+// updateCellCmd runs the UPDATE of one cell and returns the stored value.
+func updateCellCmd(client *db.Client, tab *resultTab, t db.EditTarget, keyVals []string, col int, value string) tea.Cmd {
+	keyCols := make([]int, len(t.Key))
+	for i, k := range t.Key {
+		keyCols[i] = k.Col
+	}
+	return func() tea.Msg {
+		stored, err := client.UpdateCell(context.Background(), t, keyVals, value)
+		if err != nil {
+			log.Printf("édition: %s.%s.%s: %v", t.Schema, t.Table, t.Column, err)
+		}
+		return cellUpdatedMsg{tab: tab, col: col, keyCols: keyCols, keyVals: keyVals,
+			value: stored, column: t.Column, err: err}
+	}
 }
 
 type completionsMsg struct {
@@ -242,19 +280,32 @@ func connectCmd(c config.Connection, database string) tea.Cmd {
 	}
 }
 
+// queryCmd runs every statement of sql (split on top-level semicolons)
+// sequentially on the connection, one result per statement.
 func queryCmd(client *db.Client, schema, sql string) tea.Cmd {
+	stmts := db.SplitStatements(sql)
+	if len(stmts) == 0 {
+		stmts = []string{sql}
+	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-		defer cancel()
-		if err := client.SetSearchPath(ctx, schema); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := client.SetSearchPath(ctx, schema)
+		cancel()
+		if err != nil {
 			log.Printf("requête: set search_path %s: %v", schema, err)
 			return queryDoneMsg{query: sql, err: fmt.Errorf("set search_path %s : %w", schema, err)}
 		}
-		res, err := client.Query(ctx, sql)
-		if err != nil {
-			log.Printf("requête: échec: %v — sql: %s", err, strings.Join(strings.Fields(sql), " "))
+		results := make([]stmtResult, 0, len(stmts))
+		for _, st := range stmts {
+			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			res, err := client.Query(ctx, st)
+			cancel()
+			if err != nil {
+				log.Printf("requête: échec: %v — sql: %s", err, strings.Join(strings.Fields(st), " "))
+			}
+			results = append(results, stmtResult{sql: st, res: res, err: err})
 		}
-		return queryDoneMsg{res: res, query: sql, err: err}
+		return queryDoneMsg{query: sql, results: results}
 	}
 }
 
@@ -313,17 +364,49 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.setErr(msg.err.Error())
 			return a, nil
 		}
-		a.res.SetData(msg.res.Columns, msg.res.Rows)
-		a.resInfo = fmt.Sprintf(i18n.T("results.info.rows"), len(msg.res.Rows), msg.res.Duration.Round(time.Millisecond))
-		if !msg.res.IsSelect {
-			a.resInfo = fmt.Sprintf(i18n.T("results.info.affected"), msg.res.Affected, msg.res.Duration.Round(time.Millisecond))
+		// a single failing statement: keep the previous results and the focus
+		if len(msg.results) == 1 && msg.results[0].err != nil {
+			a.setErr(msg.results[0].err.Error())
+			return a, nil
 		}
-		a.setOK(i18n.T("status.executed"))
-		a.hist.Add(msg.query, a.connName, a.database)
-		_ = a.hist.Save()
+		a.tabs = a.tabs[:0]
+		firstErr, nErr := -1, 0
+		for i, r := range msg.results {
+			t := &resultTab{sql: r.sql, label: tabLabel(r.sql), res: NewResults(),
+				result: r.res, connName: a.connName, database: a.database}
+			t.res.CanEdit = canEditFunc(r.res)
+			if r.err != nil {
+				t.err = true
+				t.res.SetError(r.err.Error())
+				t.info = i18n.T("results.info.error")
+				nErr++
+				if firstErr < 0 {
+					firstErr = i
+				}
+			} else {
+				t.res.SetData(r.res.Columns, r.res.Rows)
+				t.info = fmt.Sprintf(i18n.T("results.info.rows"), len(r.res.Rows), r.res.Duration.Round(time.Millisecond))
+				if !r.res.IsSelect {
+					t.info = fmt.Sprintf(i18n.T("results.info.affected"), r.res.Affected, r.res.Duration.Round(time.Millisecond))
+				}
+			}
+			a.tabs = append(a.tabs, t)
+		}
+		switch {
+		case nErr > 0:
+			a.setErr(fmt.Sprintf(i18n.T("status.executed.errors"), nErr, len(msg.results)))
+		case len(msg.results) > 1:
+			a.setOK(fmt.Sprintf(i18n.T("status.executed.multi"), len(msg.results)))
+		default:
+			a.setOK(i18n.T("status.executed"))
+		}
+		if nErr < len(msg.results) {
+			a.hist.Add(msg.query, a.connName, a.database)
+			_ = a.hist.Save()
+		}
 		a.zone = ZoneResults
 		a.focused = true
-		a.layout()
+		a.selectTab(maxInt(firstErr, 0)) // also calls layout()
 		return a, nil
 
 	case tablesMsg:
@@ -338,6 +421,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.tableAction = msg.action
 		a.openModal(purpTable, fmt.Sprintf(i18n.T("modal.tables"), a.schema), items)
+		return a, nil
+
+	case cellUpdatedMsg:
+		a.busy = false
+		if msg.err != nil {
+			a.setErr(fmt.Sprintf(i18n.T("status.error.cell"), msg.err.Error()))
+			return a, nil
+		}
+		// refresh every displayed row of that record (joins may repeat it)
+		for i := range msg.tab.res.Rows {
+			if msg.tab.res.rowHasKey(i, msg.keyCols, msg.keyVals) {
+				msg.tab.res.SetCell(i, msg.col, msg.value)
+			}
+		}
+		a.setOK(fmt.Sprintf(i18n.T("status.cell.updated"), msg.column, msg.value))
 		return a, nil
 
 	case editorFinishedMsg:
@@ -451,7 +549,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.setZone((a.zone + zoneCount - 1) % zoneCount)
 		return a, nil
 	case "tab", "shift+tab":
-		inInsert := a.focused && a.zone == ZoneEditor && a.ed.Mode() == editor.Insert
+		inInsert := a.focused && a.zone == ZoneEditor && a.ed.Typing()
 		if !inInsert {
 			if key == "tab" {
 				a.setZone((a.zone + 1) % zoneCount)
@@ -508,7 +606,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 		case ZoneResults:
-			if a.res.PendingKeys() == "" {
+			if a.resIdle() {
 				a.setFocused(false)
 				return a, nil
 			}
@@ -516,18 +614,30 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// q quits from the results zone (vim-ish habit) — Q skips confirmation
-	if key == "q" && a.zone == ZoneResults && a.res.PendingKeys() == "" {
+	if key == "q" && a.zone == ZoneResults && a.resIdle() {
 		a.confirmQuit = true
 		return a, nil
 	}
-	if key == "Q" && a.zone == ZoneResults && a.res.PendingKeys() == "" {
+	if key == "Q" && a.zone == ZoneResults && a.resIdle() {
 		return a.quit()
 	}
 
 	// ? shows the results help (navigation + copy)
-	if key == "?" && a.zone == ZoneResults && a.res.PendingKeys() == "" {
+	if key == "?" && a.zone == ZoneResults && a.resIdle() {
 		a.showHelp = helpResults
 		return a, nil
+	}
+
+	// H / L switch between result tabs
+	if a.zone == ZoneResults && a.resIdle() {
+		switch key {
+		case "H":
+			a.prevTab()
+			return a, nil
+		case "L":
+			a.nextTab()
+			return a, nil
+		}
 	}
 
 	// ----- zone dispatch
@@ -541,18 +651,82 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.res.Status != "" {
 			a.setOK(a.res.Status)
 		}
+		if e := a.res.TakeEdit(); e != nil {
+			return a.applyCellEdit(e)
+		}
 	}
 	return a, nil
 }
 
+// resIdle reports whether the results zone is in plain normal mode (no
+// pending keys, no search prompt, no cell editor).
+func (a *App) resIdle() bool {
+	return a.res.PendingKeys() == "" && !a.res.Editing()
+}
+
 func (a *App) setZone(z Zone) {
+	a.res.CancelEdit()
 	a.zone = z
 	a.layout()
 }
 
 func (a *App) setFocused(b bool) {
+	a.res.CancelEdit()
 	a.focused = b
 	a.layout()
+}
+
+// ------------------------------------------------------------ cell edit
+
+// canEditFunc maps the db reasons for a non-editable column to messages.
+func canEditFunc(res *db.Result) func(col int) error {
+	return func(col int) error {
+		if res == nil {
+			return errors.New(i18n.T("status.error.cell.computed"))
+		}
+		_, err := res.EditTarget(col)
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, db.ErrNotATable):
+			return errors.New(i18n.T("status.error.cell.notatable"))
+		case errors.Is(err, db.ErrNoPrimaryKey):
+			return errors.New(i18n.T("status.error.cell.nopk"))
+		case errors.Is(err, db.ErrKeyNotInRows):
+			return errors.New(i18n.T("status.error.cell.pkmissing"))
+		default:
+			return errors.New(i18n.T("status.error.cell.computed"))
+		}
+	}
+}
+
+// applyCellEdit turns a committed cell edition into an UPDATE on the table
+// the column comes from.
+func (a *App) applyCellEdit(e *CellEdit) (tea.Model, tea.Cmd) {
+	if a.curTab >= len(a.tabs) || a.tabs[a.curTab].res != a.res || a.tabs[a.curTab].result == nil {
+		a.setErr(i18n.T("status.error.cell.computed"))
+		return a, nil
+	}
+	tab := a.tabs[a.curTab]
+	if a.client == nil || tab.connName != a.connName || tab.database != a.database {
+		a.setErr(i18n.T("status.error.cell.otherdb"))
+		return a, nil
+	}
+	if e.Value == a.res.cell(e.Row, e.Col) {
+		return a, nil // nothing changed
+	}
+	target, err := tab.result.EditTarget(e.Col)
+	if err != nil {
+		a.setErr(canEditFunc(tab.result)(e.Col).Error())
+		return a, nil
+	}
+	keyVals := make([]string, len(target.Key))
+	for i, k := range target.Key {
+		keyVals[i] = a.res.cell(e.Row, k.Col)
+	}
+	a.busy = true
+	a.setOK(i18n.T("status.cell.updating"))
+	return a, updateCellCmd(a.client, tab, target, keyVals, e.Col, e.Value)
 }
 
 func (a *App) handleHeaderKey(key string) {

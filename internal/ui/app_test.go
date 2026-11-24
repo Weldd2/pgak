@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"pgak/internal/config"
+	"pgak/internal/db"
 	"pgak/internal/history"
 	"pgak/internal/i18n"
 )
@@ -108,9 +110,9 @@ func TestWindowSelectionMode(t *testing.T) {
 
 func TestEscFromEditorModes(t *testing.T) {
 	a := newTestApp()
-	press(a, "enter")   // focus editor
-	press(a, "i", "x")  // insert mode
-	press(a, "esc")     // insert -> normal, still focused
+	press(a, "enter")  // focus editor
+	press(a, "i", "x") // insert mode
+	press(a, "esc")    // insert -> normal, still focused
 	if !a.focused {
 		t.Fatal("esc from insert must stay focused")
 	}
@@ -524,4 +526,285 @@ func TestSmallTerminalNoPanic(t *testing.T) {
 	a.View()
 	press(a, "tab", "tab", "tab")
 	a.View()
+}
+
+// multiRun feeds the app a finished multi-statement run (no database needed).
+func multiRun(a *App, results ...stmtResult) {
+	sqls := make([]string, len(results))
+	for i, r := range results {
+		sqls[i] = r.sql
+	}
+	a.Update(queryDoneMsg{query: strings.Join(sqls, ";\n"), results: results})
+}
+
+func okStmt(sql string, cols []string, rows ...[]string) stmtResult {
+	return stmtResult{sql: sql, res: &db.Result{Columns: cols, Rows: rows, IsSelect: true}}
+}
+
+func TestResultTabsFromMultipleStatements(t *testing.T) {
+	a := newTestApp()
+	a.connName, a.database = "local", "appdb"
+	multiRun(a,
+		okStmt("select 1 as one", []string{"one"}, []string{"1"}),
+		okStmt("select 'deux' as two", []string{"two"}, []string{"deux"}),
+		okStmt("select 3 as three", []string{"three"}, []string{"3"}),
+	)
+	if len(a.tabs) != 3 || a.curTab != 0 {
+		t.Fatalf("tabs=%d cur=%d", len(a.tabs), a.curTab)
+	}
+	if a.zone != ZoneResults || !a.focused {
+		t.Fatal("focus should move to results")
+	}
+	if a.statusErr || !strings.Contains(a.status, "3 requêtes") {
+		t.Fatalf("status=%q err=%v", a.status, a.statusErr)
+	}
+	if len(a.hist.Entries) != 1 || !strings.Contains(a.hist.Entries[0].Query, "select 3") {
+		t.Fatalf("history should hold the whole editor text: %+v", a.hist.Entries)
+	}
+	v := a.View()
+	for _, s := range []string{"1:select 1 as one", "2:select 'deux' as …", "3:select 3 as three"} {
+		if !strings.Contains(v, s) {
+			t.Fatalf("tab bar missing %q in:\n%s", s, v)
+		}
+	}
+	if !strings.Contains(v, "one") || strings.Contains(v, "deux") && !strings.Contains(v, "2:select") {
+		t.Fatal("first tab should be displayed")
+	}
+
+	// L / H move right / left with wrap-around
+	press(a, "L")
+	if a.curTab != 1 || a.res != a.tabs[1].res {
+		t.Fatalf("L: cur=%d", a.curTab)
+	}
+	if !strings.Contains(a.View(), "deux") {
+		t.Fatal("second tab content not rendered")
+	}
+	press(a, "L", "L")
+	if a.curTab != 0 {
+		t.Fatalf("L wrap: cur=%d", a.curTab)
+	}
+	press(a, "H")
+	if a.curTab != 2 {
+		t.Fatalf("H wrap: cur=%d", a.curTab)
+	}
+	press(a, "H")
+	if a.curTab != 1 {
+		t.Fatalf("H: cur=%d", a.curTab)
+	}
+	// the tab bar takes one line off the table
+	if a.res.height != a.tabs[1].res.height || a.res.height <= 0 {
+		t.Fatalf("height=%d", a.res.height)
+	}
+	a.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	_, _, resH := a.zoneHeights()
+	if a.res.height != resH-3 {
+		t.Fatalf("results height %d, want %d (tab bar line)", a.res.height, resH-3)
+	}
+}
+
+func TestSingleStatementNoTabBar(t *testing.T) {
+	a := newTestApp()
+	multiRun(a, okStmt("select 1", []string{"n"}, []string{"1"}))
+	if len(a.tabs) != 1 || a.showTabBar() {
+		t.Fatalf("tabs=%d bar=%v", len(a.tabs), a.showTabBar())
+	}
+	if strings.Contains(a.View(), "1:select 1") {
+		t.Fatal("tab bar must not render for a single result")
+	}
+	_, _, resH := a.zoneHeights()
+	if a.res.height != resH-2 {
+		t.Fatalf("results height %d, want %d", a.res.height, resH-2)
+	}
+	press(a, "L", "H") // no-ops
+	if a.curTab != 0 {
+		t.Fatal("H/L should be no-ops with one tab")
+	}
+}
+
+func TestResultTabsWithErrors(t *testing.T) {
+	a := newTestApp()
+	multiRun(a,
+		okStmt("select 1", []string{"n"}, []string{"1"}),
+		stmtResult{sql: "select * from nope", err: errors.New(`relation "nope" does not exist`)},
+		okStmt("select 3", []string{"n"}, []string{"3"}),
+	)
+	if len(a.tabs) != 3 {
+		t.Fatalf("tabs=%d", len(a.tabs))
+	}
+	if a.curTab != 1 {
+		t.Fatalf("the first failing tab should be selected, got %d", a.curTab)
+	}
+	if !a.statusErr || !strings.Contains(a.status, "1/3") {
+		t.Fatalf("status=%q", a.status)
+	}
+	v := a.View()
+	if !strings.Contains(v, `relation "nope" does not exist`) {
+		t.Fatalf("error tab should show the message:\n%s", v)
+	}
+	if !strings.Contains(a.resInfo, "erreur") {
+		t.Fatalf("resInfo=%q", a.resInfo)
+	}
+	// navigation keys on an error tab must not panic
+	press(a, "j", "k", "g", "g", "G", "y", "y")
+	press(a, "L")
+	if a.curTab != 2 || !strings.Contains(a.View(), "3") {
+		t.Fatalf("L: cur=%d", a.curTab)
+	}
+	// history is still recorded since at least one statement succeeded
+	if len(a.hist.Entries) != 1 {
+		t.Fatalf("history=%d", len(a.hist.Entries))
+	}
+}
+
+func TestSingleFailingStatementKeepsPreviousResults(t *testing.T) {
+	a := newTestApp()
+	multiRun(a, okStmt("select 1", []string{"n"}, []string{"1"}))
+	press(a, "esc", "k", "enter") // back to the editor
+	multiRun(a, stmtResult{sql: "select nope", err: errors.New("boom")})
+	if !a.statusErr || a.status != "boom" {
+		t.Fatalf("status=%q", a.status)
+	}
+	if len(a.tabs) != 1 || a.res.Err != "" || len(a.res.Rows) != 1 {
+		t.Fatal("previous results must be kept on a single failing statement")
+	}
+	if a.zone != ZoneEditor {
+		t.Fatal("focus must stay in the editor")
+	}
+}
+
+func TestResultsScreenKeysJK(t *testing.T) {
+	r := NewResults()
+	r.SetSize(80, 8) // pageSize = 6
+	rows := make([][]string, 50)
+	for i := range rows {
+		rows[i] = []string{strconv.Itoa(i)}
+	}
+	r.SetData([]string{"n"}, rows)
+	k := func(keys ...string) {
+		for _, s := range keys {
+			r.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)})
+		}
+	}
+	k("2", "0", "j") // row 20, scrolled so that 20 is the last visible row
+	if r.curRow != 20 || r.scrollRow != 15 {
+		t.Fatalf("20j: cur=%d scroll=%d", r.curRow, r.scrollRow)
+	}
+	k("K")
+	if r.curRow != 15 {
+		t.Fatalf("K (top of screen): cur=%d", r.curRow)
+	}
+	k("J")
+	if r.curRow != 20 {
+		t.Fatalf("J (bottom of screen): cur=%d", r.curRow)
+	}
+	k("M")
+	if r.curRow != 18 {
+		t.Fatalf("M: cur=%d", r.curRow)
+	}
+	// H / L no longer move inside the table
+	k("H", "L")
+	if r.curRow != 18 {
+		t.Fatalf("H/L must not move the cursor: cur=%d", r.curRow)
+	}
+}
+
+func TestResultsCellEdit(t *testing.T) {
+	r := NewResults()
+	r.SetSize(80, 8)
+	r.SetData([]string{"id", "name"}, [][]string{{"1", "ab"}, {"2", "cd"}})
+	k := func(keys ...string) {
+		for _, s := range keys {
+			switch s {
+			case "enter":
+				r.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			case "esc":
+				r.Update(tea.KeyMsg{Type: tea.KeyEsc})
+			case "left":
+				r.Update(tea.KeyMsg{Type: tea.KeyLeft})
+			case "backspace":
+				r.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+			case "ctrl+u":
+				r.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+			default:
+				r.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)})
+			}
+		}
+	}
+	// i edits the current value, keys are inserted at the cursor
+	k("l", "i")
+	if !r.Editing() {
+		t.Fatal("i should open the editor")
+	}
+	k("left", "X", "enter")
+	e := r.TakeEdit()
+	if e == nil || e.Row != 0 || e.Col != 1 || e.Value != "aXb" {
+		t.Fatalf("edit: %+v", e)
+	}
+	if r.Editing() || r.TakeEdit() != nil {
+		t.Fatal("editor should be closed and the edit consumed")
+	}
+	// the displayed value only changes once the app applies it
+	if r.cell(0, 1) != "ab" {
+		t.Fatalf("cell changed before apply: %q", r.cell(0, 1))
+	}
+	r.SetCell(0, 1, "a very long value indeed")
+	if r.cell(0, 1) != "a very long value indeed" || r.widths[1] != 24 {
+		t.Fatalf("SetCell: %q width=%d", r.cell(0, 1), r.widths[1])
+	}
+
+	// esc cancels, movement keys are not interpreted while editing
+	k("j", "c")
+	if !r.Editing() || string(r.editBuf) != "" {
+		t.Fatalf("c should start from an empty value: %q", string(r.editBuf))
+	}
+	k("j", "q", "esc")
+	if r.Editing() || r.TakeEdit() != nil || r.curRow != 1 {
+		t.Fatal("esc should cancel without moving")
+	}
+	// enter also edits; ctrl+u clears; the view shows the editor
+	k("enter", "ctrl+u", "x", "y")
+	if !strings.Contains(r.View(), "xy") {
+		t.Fatal("editor not rendered")
+	}
+	k("backspace", "enter")
+	if e := r.TakeEdit(); e == nil || e.Value != "x" || e.Row != 1 {
+		t.Fatalf("edit: %+v", e)
+	}
+
+	// CanEdit veto: no editor, the reason goes to Status
+	r.CanEdit = func(col int) error { return errors.New("nope") }
+	k("i")
+	if r.Editing() || r.Status != "nope" {
+		t.Fatalf("veto: editing=%v status=%q", r.Editing(), r.Status)
+	}
+}
+
+func TestAppCellEditKeys(t *testing.T) {
+	a := newTestApp()
+	a.res.SetData([]string{"id", "v"}, [][]string{{"1", "a"}})
+	a.layout()
+	press(a, "j", "enter") // focus results
+	press(a, "l", "i")
+	if !a.res.Editing() || !strings.Contains(a.View(), "INSERT") {
+		t.Fatal("results should be in insert mode")
+	}
+	// q and ? are typed, not interpreted; esc closes the editor but keeps the focus
+	press(a, "q", "?")
+	if a.confirmQuit || a.showHelp != helpNone || string(a.res.editBuf) != "aq?" {
+		t.Fatalf("keys interpreted while editing: %q", string(a.res.editBuf))
+	}
+	press(a, "esc")
+	if a.res.Editing() || !a.focused || a.zone != ZoneResults {
+		t.Fatal("esc should only close the editor")
+	}
+	// committing without a backing table is refused
+	press(a, "i", "z", "enter")
+	if !a.statusErr || a.res.cell(0, 1) != "a" {
+		t.Fatalf("status=%q err=%v cell=%q", a.status, a.statusErr, a.res.cell(0, 1))
+	}
+	// changing zone cancels the edition
+	press(a, "i", "tab")
+	if a.res.Editing() {
+		t.Fatal("zone change should cancel the edition")
+	}
 }

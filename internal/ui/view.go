@@ -88,7 +88,11 @@ func (a *App) layout() {
 	_, edH, resH := a.zoneHeights()
 	innerW := maxInt(10, a.width-4)
 	a.ed.SetSize(innerW, edH-2)
-	a.res.SetSize(innerW, resH-2)
+	resInner := resH - 2
+	if a.showTabBar() {
+		resInner-- // one line for the tab bar
+	}
+	a.res.SetSize(innerW, maxInt(1, resInner))
 	a.ed.SetFocused(a.focused && a.zone == ZoneEditor)
 	a.res.SetFocused(a.focused && a.zone == ZoneResults)
 	if a.modal != nil {
@@ -168,7 +172,7 @@ func overlayTitle(borderLine, title string, offset int) string {
 	// instead, re-render a plain top border and inject the title.
 	left := strings.Repeat("─", offset)
 	right := strings.Repeat("─", maxInt(0, w-offset-tw-2))
-	return dimTopBorder("╭" + left) + title + dimTopBorder(right+"╮")
+	return dimTopBorder("╭"+left) + title + dimTopBorder(right+"╮")
 }
 
 func dimTopBorder(s string) string {
@@ -190,7 +194,11 @@ func (a *App) View() string {
 	if a.resInfo != "" {
 		resTitle += " · " + a.resInfo
 	}
-	resultsBox := a.zoneBox(ZoneResults, resTitle, a.res.View(), resH)
+	resContent := a.res.View()
+	if a.showTabBar() {
+		resContent = a.tabBar(maxInt(10, a.width-4)) + "\n" + resContent
+	}
+	resultsBox := a.zoneBox(ZoneResults, resTitle, resContent, resH)
 
 	main := lipgloss.JoinVertical(lipgloss.Left, header, editorBox, resultsBox, a.statusBar())
 
@@ -255,9 +263,9 @@ func resultsHelp() string {
 		i18n.T("results.help.nav.word"),
 		i18n.T("results.help.nav.line"),
 		i18n.T("results.help.nav.halfpage"),
-		i18n.T("results.help.nav.page"),
 		i18n.T("results.help.nav.screen"),
 		i18n.T("results.help.nav.count"),
+		i18n.T("results.help.nav.tabs"),
 		"",
 		section.Render(i18n.T("results.help.copy")),
 		i18n.T("results.help.copy.cell"),
@@ -271,6 +279,12 @@ func resultsHelp() string {
 		section.Render(i18n.T("results.help.search")),
 		i18n.T("results.help.search.start"),
 		i18n.T("results.help.search.next"),
+		"",
+		section.Render(i18n.T("results.help.edit")),
+		i18n.T("results.help.edit.start"),
+		i18n.T("results.help.edit.keys"),
+		i18n.T("results.help.edit.null"),
+		i18n.T("results.help.edit.require"),
 		"",
 		section.Render(i18n.T("results.help.misc")),
 		i18n.T("results.help.misc.esc"),
@@ -319,8 +333,12 @@ func (a *App) statusBar() string {
 	case !a.focused:
 		mode = i18n.T("mode.window")
 		modeStyle = modeStyleWindow
-	case a.zone == ZoneEditor && a.ed.Mode() == editor.Insert:
+	case a.zone == ZoneEditor && a.ed.Mode() == editor.Insert,
+		a.zone == ZoneResults && a.res.Editing():
 		mode = i18n.T("mode.insert")
+		modeStyle = modeStyleInsert
+	case a.zone == ZoneEditor && a.ed.Mode() == editor.Replace:
+		mode = i18n.T("mode.replace")
 		modeStyle = modeStyleInsert
 	case a.zone == ZoneEditor && a.ed.Mode() == editor.Visual:
 		mode = i18n.T("mode.visual")
@@ -361,6 +379,8 @@ func (a *App) statusBar() string {
 		hints = i18n.T("statusbar.hints.modal")
 	case !a.focused:
 		hints = i18n.T("statusbar.hints.window")
+	case a.zone == ZoneResults && a.res.Editing():
+		hints = i18n.T("statusbar.hints.celledit")
 	case a.zone == ZoneResults:
 		hints = i18n.T("statusbar.hints.results") + hints
 	}

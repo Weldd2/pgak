@@ -79,7 +79,7 @@ The selected window has a yellow border; the focused window takes its zone color
 |---|---|
 | `tab` / `shift+tab` | next / previous window (outside insert mode) |
 | `ctrl+j` / `ctrl+k` | next / previous window (everywhere) |
-| `ctrl+e` / `F5` | execute query |
+| `ctrl+e` / `F5` | execute the query (or queries, separated by `;`) |
 | `ctrl+p` | query history (query zone) |
 | `ctrl+t` | quick actions menu |
 | `ctrl+c` | quit |
@@ -124,12 +124,11 @@ Visual mode: motions and text objects extend the selection, `o` swaps the ends, 
 - `esc`: insert → normal → window mode (in a modal: normal → close)
 - Yanks also go to the system clipboard
 - Not implemented: block visual (`ctrl+v`), named registers, macros, `=`, `:` commands. `ctrl+e`, `ctrl+o`, `ctrl+p`, `ctrl+t`, `ctrl+j`, `ctrl+k` are application shortcuts.
-- `esc`: insert → normal → window mode (in a modal: normal → close)
-- Yanks also go to the system clipboard
 
 ### Results (green)
 
-- Navigation: `h j k l`, `0 $`, `gg G`, `ctrl+d` / `ctrl+u`
+- Navigation: `h j k l`, `0 $`, `gg G`, `ctrl+d` / `ctrl+u`, `K` / `M` / `J` (top / middle / bottom of screen)
+- Tabs: `H` / `L` previous / next result tab (see below)
 - Copy (system clipboard):
 
 | Keys | Copy |
@@ -142,7 +141,33 @@ Visual mode: motions and text objects extend the selection, `o` swaps the ends, 
 | `yO` | column with header |
 | `ya` | all results (TSV) |
 
+- Edit a cell (runs an `UPDATE` on the source table):
+
+| Keys | Action |
+|---|---|
+| `i` / `↵` | edit the current cell (cursor at the end) |
+| `c` | change the cell (start from an empty value) |
+| `↵` / `esc` | apply / cancel · `ctrl+u` `ctrl+w` `ctrl+k` delete · `←` `→` `home` `end` |
+
+  The cell must come from a table column (not an expression or a view) and the table's primary key column(s) must be in the result: `SELECT id, name FROM users` is editable, `SELECT name FROM users` or `SELECT upper(name) …` is not. The statement is `UPDATE table SET col = $1 WHERE pk = $2 RETURNING col`: the value is sent as text and cast by the server (a bad value is reported, nothing is changed); the displayed cell is refreshed with the stored value. Typing `NULL` stores SQL NULL. Values are displayed in the server's text form, like psql (`{1,2}` for arrays, json as is, `2024-01-02 03:04:05+01` for timestamps), so a displayed value is always a valid input.
+
+
 - `q`: quit
+
+#### Multiple queries → tabs
+
+Several statements can be typed in the editor, separated by `;`. They run in order and each result opens in its own tab in the results zone, like browser or neovim tabs:
+
+```
+╭─── Results · 2 row(s) · 3ms ─────────────────────────────╮
+│ 1:SELECT * FROM users…  2:SELECT count(*) …  3:UPDATE … │  ← tab bar (H / L)
+│ id  │ email             │ created_at │                   │
+```
+
+- `H` / `L`: previous / next tab (wraps around)
+- A failing statement gets a red tab showing the error; the other statements still run. The first failing tab is selected after the run.
+- Semicolons inside strings, comments and `$$` bodies are not separators.
+- The whole editor text is saved as one history entry.
 
 ### Modals (selects, form)
 
@@ -265,7 +290,7 @@ La fenêtre sélectionnée a une bordure jaune ; la fenêtre focus prend la coul
 |---|---|
 | `tab` / `shift+tab` | fenêtre suivante / précédente (hors mode insertion) |
 | `ctrl+j` / `ctrl+k` | fenêtre suivante / précédente (partout) |
-| `ctrl+e` / `F5` | exécuter la requête |
+| `ctrl+e` / `F5` | exécuter la requête (ou les requêtes, séparées par `;`) |
 | `ctrl+p` | historique des requêtes (zone requête) |
 | `ctrl+t` | menu quick actions |
 | `ctrl+c` | quitter |
@@ -310,12 +335,11 @@ Mode visuel : motions et objets de texte étendent la sélection, `o` échange l
 - `esc` : insertion → normal → mode fenêtre (dans une modale : normal → fermeture)
 - Les yanks vont aussi dans le presse-papier système
 - Non implémenté : visuel par blocs (`ctrl+v`), registres nommés, macros, `=`, commandes `:`. `ctrl+e`, `ctrl+o`, `ctrl+p`, `ctrl+t`, `ctrl+j`, `ctrl+k` sont des raccourcis de l'application.
-- `esc` : insertion → normal → mode fenêtre (dans une modale : normal → fermeture)
-- Les yanks vont aussi dans le presse-papier système
 
 ### Résultats (verte)
 
-- Navigation : `h j k l`, `0 $`, `gg G`, `ctrl+d` / `ctrl+u`
+- Navigation : `h j k l`, `0 $`, `gg G`, `ctrl+d` / `ctrl+u`, `K` / `M` / `J` (haut / milieu / bas de l'écran)
+- Onglets : `H` / `L` onglet de résultat précédent / suivant (voir ci-dessous)
 - Copie (presse-papier système) :
 
 | Touches | Copie |
@@ -328,7 +352,33 @@ Mode visuel : motions et objets de texte étendent la sélection, `o` échange l
 | `yO` | colonne avec en-tête |
 | `ya` | tout le résultat (TSV) |
 
+- Éditer une cellule (exécute un `UPDATE` sur la table d'origine) :
+
+| Touches | Action |
+|---|---|
+| `i` / `↵` | éditer la cellule courante (curseur à la fin) |
+| `c` | changer la cellule (partir d'une valeur vide) |
+| `↵` / `esc` | appliquer / annuler · `ctrl+u` `ctrl+w` `ctrl+k` effacer · `←` `→` `home` `end` |
+
+  La cellule doit provenir d'une colonne de table (pas une expression ni une vue) et la ou les colonnes de la clé primaire doivent être dans le résultat : `SELECT id, name FROM users` est éditable, `SELECT name FROM users` ou `SELECT upper(name) …` ne l'est pas. La requête est `UPDATE table SET col = $1 WHERE pk = $2 RETURNING col` : la valeur est envoyée en texte et convertie par le serveur (une valeur invalide est signalée, rien n'est modifié) ; la cellule affichée est rafraîchie avec la valeur enregistrée. Saisir `NULL` enregistre un NULL SQL. Les valeurs sont affichées dans la forme texte du serveur, comme psql (`{1,2}` pour les tableaux, le json tel quel, `2024-01-02 03:04:05+01` pour les timestamps) : une valeur affichée est donc toujours une saisie valide.
+
+
 - `q` : quitter
+
+#### Plusieurs requêtes → onglets
+
+On peut saisir plusieurs requêtes dans l'éditeur, séparées par `;`. Elles s'exécutent dans l'ordre et chaque résultat s'ouvre dans son propre onglet de la zone résultats, comme les tabs d'un navigateur ou de neovim :
+
+```
+╭─── Résultats · 2 ligne(s) · 3ms ─────────────────────────╮
+│ 1:SELECT * FROM users…  2:SELECT count(*) …  3:UPDATE … │  ← barre d'onglets (H / L)
+│ id  │ email             │ created_at │                   │
+```
+
+- `H` / `L` : onglet précédent / suivant (en boucle)
+- Une requête en échec a un onglet rouge qui affiche l'erreur ; les autres s'exécutent quand même. Le premier onglet en erreur est sélectionné après l'exécution.
+- Les `;` dans les chaînes, les commentaires et les corps `$$` ne sont pas des séparateurs.
+- Tout le texte de l'éditeur est enregistré comme une seule entrée d'historique.
 
 ### Modales (selects, formulaire)
 

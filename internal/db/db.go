@@ -23,6 +23,7 @@ type Result struct {
 	// (see EditTarget). Tables is nil when the lookup failed.
 	Sources []ColumnSource
 	Tables  map[uint32]Table
+	Types   []uint32 // data type OID of each column
 }
 
 // Client wraps a single pgx connection to one database.
@@ -84,7 +85,9 @@ func (c *Client) Query(ctx context.Context, sql string) (*Result, error) {
 	fields := rows.FieldDescriptions()
 	cols := make([]string, len(fields))
 	sources := make([]ColumnSource, len(fields))
+	types := make([]uint32, len(fields))
 	for i, f := range fields {
+		types[i] = f.DataTypeOID
 		cols[i] = f.Name
 		sources[i] = ColumnSource{TableOID: f.TableOID, AttNum: f.TableAttributeNumber}
 	}
@@ -110,6 +113,7 @@ func (c *Client) Query(ctx context.Context, sql string) (*Result, error) {
 		Duration: time.Since(start),
 		IsSelect: tag.Select(),
 		Sources:  sources,
+		Types:    types,
 	}
 	// best effort: without table info the cells are simply not editable
 	if tables, err := c.loadTables(ctx, sources); err == nil {

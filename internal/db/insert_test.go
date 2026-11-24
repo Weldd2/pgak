@@ -98,3 +98,29 @@ func TestLiveInsertRow(t *testing.T) {
 		t.Fatal("expected a NOT NULL violation")
 	}
 }
+
+func TestInsertSQL(t *testing.T) {
+	r := sampleResult()
+	r.Types = []uint32{23, 25, 25, 23, 16} // int4, text, text, int4, bool
+	tb := r.Tables[10]
+	r.Tables[10] = tb
+	got := r.InsertSQL(1, [][]string{{"1", "o'neil", "X", "5", "true"}})
+	want := `INSERT INTO "public"."users" ("id", "name") VALUES (1, 'o''neil');`
+	if got != want {
+		t.Fatalf("\n got %s\nwant %s", got, want)
+	}
+	got = r.InsertSQL(3, [][]string{{"1", "a", "A", "5", "true"}, {"2", "b", "B", "NULL", "NULL"}})
+	want = "INSERT INTO \"public\".\"tags\" (\"id\", \"label\") VALUES\n  (5, true),\n  (NULL, NULL);"
+	if got != want {
+		t.Fatalf("\n got %s\nwant %s", got, want)
+	}
+	// computed column: every result column, placeholder table
+	got = r.InsertSQL(2, [][]string{{"1", "a", "A", "5", "false"}})
+	want = `INSERT INTO table_name ("id", "name", "upper", "tid", "label") VALUES (1, 'a', 'A', 5, false);`
+	if got != want {
+		t.Fatalf("\n got %s\nwant %s", got, want)
+	}
+	if sqlLiteral("NaN", 701) != "'NaN'" || sqlLiteral("-1.5e3", 701) != "-1.5e3" {
+		t.Fatal("float literals")
+	}
+}

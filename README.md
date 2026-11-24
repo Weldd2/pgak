@@ -140,6 +140,7 @@ Visual mode: motions and text objects extend the selection, `o` swaps the ends, 
 | `yo` | entire column |
 | `yO` | column with header |
 | `ya` | all results (TSV) |
+| `yi` / `yI` | current row / all rows as a SQL `INSERT` (table of the current column) |
 
 - Edit a cell (runs an `UPDATE` on the source table):
 
@@ -361,6 +362,7 @@ Mode visuel : motions et objets de texte étendent la sélection, `o` échange l
 | `yo` | colonne entière |
 | `yO` | colonne avec en-tête |
 | `ya` | tout le résultat (TSV) |
+| `yi` / `yI` | ligne courante / toutes les lignes en `INSERT` SQL (table de la colonne courante) |
 
 - Éditer une cellule (exécute un `UPDATE` sur la table d'origine) :
 

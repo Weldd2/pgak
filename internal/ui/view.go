@@ -275,6 +275,7 @@ func resultsHelp() string {
 		i18n.T("results.help.copy.column"),
 		i18n.T("results.help.copy.columnhead"),
 		i18n.T("results.help.copy.all"),
+		i18n.T("results.help.copy.insert"),
 		"",
 		section.Render(i18n.T("results.help.search")),
 		i18n.T("results.help.search.start"),

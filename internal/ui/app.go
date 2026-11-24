@@ -394,6 +394,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t := &resultTab{sql: r.sql, label: tabLabel(r.sql), res: NewResults(),
 				result: r.res, connName: a.connName, database: a.database}
 			t.res.CanEdit = canEditFunc(r.res)
+			if r.res != nil {
+				t.res.InsertSQL = r.res.InsertSQL
+			}
 			if r.err != nil {
 				t.err = true
 				t.res.SetError(r.err.Error())

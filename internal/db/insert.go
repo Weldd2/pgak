@@ -3,10 +3,12 @@ package db
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // InsertCol binds a result column to the table column it comes from.
@@ -115,4 +117,77 @@ func insertRowSQL(t InsertTarget, values map[int]string) (string, []any) {
 	}
 	sb.WriteString(" RETURNING " + strings.Join(returning, ", "))
 	return sb.String(), args
+}
+
+// InsertSQL renders rows of the result as a ready-to-run INSERT statement
+// for the table column col comes from (generated columns are left out).
+// When the column is not backed by a table, every result column is used with
+// a placeholder table name. Values are the displayed strings: numbers and
+// booleans are written bare, the rest as quoted literals cast by the server.
+func (r *Result) InsertSQL(col int, rows [][]string) string {
+	table := "table_name"
+	var names []string
+	var idx []int
+	if t, err := r.InsertTarget(col); err == nil {
+		table = QuoteIdent(t.Schema) + "." + QuoteIdent(t.Table)
+		seen := map[string]bool{}
+		for _, c := range t.Cols {
+			if c.Generated || seen[c.Name] {
+				continue
+			}
+			seen[c.Name] = true
+			names = append(names, QuoteIdent(c.Name))
+			idx = append(idx, c.Col)
+		}
+	} else {
+		for i, c := range r.Columns {
+			names = append(names, QuoteIdent(c))
+			idx = append(idx, i)
+		}
+	}
+	var sb strings.Builder
+	sb.WriteString("INSERT INTO " + table + " (" + strings.Join(names, ", ") + ") VALUES")
+	for n, row := range rows {
+		if n > 0 {
+			sb.WriteString(",")
+		}
+		if len(rows) > 1 {
+			sb.WriteString("\n  ")
+		} else {
+			sb.WriteString(" ")
+		}
+		vals := make([]string, len(idx))
+		for i, c := range idx {
+			v := ""
+			if c < len(row) {
+				v = row[c]
+			}
+			var oid uint32
+			if c < len(r.Types) {
+				oid = r.Types[c]
+			}
+			vals[i] = sqlLiteral(v, oid)
+		}
+		sb.WriteString("(" + strings.Join(vals, ", ") + ")")
+	}
+	sb.WriteString(";")
+	return sb.String()
+}
+
+// sqlLiteral renders a displayed value as a SQL literal.
+func sqlLiteral(v string, oid uint32) string {
+	if v == NullLiteral {
+		return "NULL"
+	}
+	switch oid {
+	case pgtype.BoolOID:
+		if v == "true" || v == "false" {
+			return v
+		}
+	case pgtype.Int2OID, pgtype.Int4OID, pgtype.Int8OID, pgtype.Float4OID, pgtype.Float8OID, pgtype.NumericOID:
+		if _, err := strconv.ParseFloat(v, 64); err == nil && strings.Trim(v, "0123456789.-+eE") == "" {
+			return v
+		}
+	}
+	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 }

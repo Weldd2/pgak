@@ -41,10 +41,13 @@ type Results struct {
 	// cell editing (i / c): CanEdit, when set, vetoes the edition of a
 	// column with a user-facing error; edit holds the committed value
 	CanEdit func(col int) error
-	editing bool
-	editBuf []rune
-	editCur int
-	edit    *CellEdit
+	// InsertSQL, when set, renders rows as an INSERT statement for the table
+	// column col comes from (yi / yI)
+	InsertSQL func(col int, rows [][]string) string
+	editing   bool
+	editBuf   []rune
+	editCur   int
+	edit      *CellEdit
 
 	// row insertion (o / p): see results_draft.go
 	draft      *draftRow
@@ -352,6 +355,25 @@ func (r *Results) yank(key string) {
 		}
 		text = sb.String()
 		what = i18n.T("yank.all")
+	case "i", "I": // ligne / toutes les lignes en INSERT
+		if r.InsertSQL == nil {
+			return
+		}
+		rows := [][]string{r.Rows[r.curRow]}
+		what = i18n.T("yank.insert")
+		if key == "I" {
+			rows = rows[:0]
+			for i, row := range r.Rows {
+				if r.draft == nil || i != r.draft.row {
+					rows = append(rows, row)
+				}
+			}
+			what = i18n.T("yank.insertall")
+		}
+		if len(rows) == 0 {
+			return
+		}
+		text = r.InsertSQL(r.curCol, rows)
 	default:
 		return
 	}

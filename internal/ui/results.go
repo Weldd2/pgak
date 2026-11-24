@@ -46,6 +46,11 @@ type Results struct {
 	editCur int
 	edit    *CellEdit
 
+	// row insertion (o / p): see results_draft.go
+	draft      *draftRow
+	rowAction  RowAction
+	draftStyle lipgloss.Style
+
 	headStyle  lipgloss.Style
 	cellStyle  lipgloss.Style
 	curStyle   lipgloss.Style
@@ -67,6 +72,7 @@ func NewResults() *Results {
 		matchStyle: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("221")),
 		errStyle:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("203")),
 
+		draftStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("114")),
 		editStyle:    lipgloss.NewStyle().Background(lipgloss.Color("71")).Foreground(lipgloss.Color("231")),
 		editCurStyle: lipgloss.NewStyle().Reverse(true),
 	}
@@ -89,6 +95,7 @@ func (r *Results) SetData(cols []string, rows [][]string) {
 	r.pendingY, r.pendingG = false, false
 	r.searching, r.searchInput, r.searchQuery = false, "", ""
 	r.CancelEdit()
+	r.draft, r.rowAction = nil, RowNone
 	r.widths = make([]int, len(cols))
 	for i, c := range cols {
 		r.widths[i] = clampInt(runewidth.StringWidth(c), minColWidth, maxColWidth)
@@ -215,6 +222,27 @@ func (r *Results) Update(msg tea.KeyMsg) {
 	case "c": // change the cell (start from an empty value)
 		r.count = 0
 		r.startEdit(false)
+		return
+	case "o", "p", "ctrl+s": // new row / duplicate row / insert the draft
+		r.count = 0
+		switch {
+		case key == "ctrl+s":
+			if r.draft != nil {
+				r.rowAction = RowCommit
+			}
+		case r.draft != nil:
+			r.Status = i18n.T("status.row.draftexists")
+		case key == "o":
+			r.rowAction = RowNew
+		case len(r.Rows) > 0:
+			r.rowAction = RowDuplicate
+		}
+		return
+	case "x": // draft row: back to the column default
+		r.count = 0
+		if r.onDraft() {
+			r.resetDraftCell(r.curCol)
+		}
 		return
 	case "n":
 		r.jumpMatch(r.takeCount())
@@ -515,9 +543,23 @@ func (r *Results) View() string {
 		for c := r.scrollCol; c < len(r.Cols); c++ {
 			cell := padCell(r.cell(idx, c), r.widths[c])
 			matched := r.matchesSearch(idx, c)
+			isDraft := r.draft != nil && idx == r.draft.row
+			unset := isDraft && !r.draft.set[c]
+			if unset {
+				cell = padCell(r.draftPlaceholder(c), r.widths[c])
+			}
 			switch {
 			case r.editing && idx == r.curRow && c == r.curCol:
 				ln.WriteString(r.editView(r.widths[c]))
+			case isDraft && !(r.focused && idx == r.curRow && c == r.curCol):
+				st := r.draftStyle
+				if unset {
+					st = r.dimStyle
+				}
+				if r.focused && idx == r.curRow {
+					st = st.Background(lipgloss.Color("236"))
+				}
+				ln.WriteString(st.Render(cell))
 			case r.focused && idx == r.curRow && c == r.curCol:
 				ln.WriteString(r.curStyle.Render(cell))
 			case matched && r.focused && idx == r.curRow:

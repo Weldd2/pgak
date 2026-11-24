@@ -21,6 +21,8 @@ type resultTab struct {
 	result   *db.Result // raw result (column origins, for cell editing)
 	connName string     // connection / database the result comes from:
 	database string     // cell edits are refused after switching
+
+	insert db.InsertTarget // table the draft row (o / p) goes to
 }
 
 const tabLabelWidth = 18

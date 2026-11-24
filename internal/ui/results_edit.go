@@ -5,6 +5,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
+
+	"pgak/internal/i18n"
 )
 
 // CellEdit is a committed cell edition, to be applied by the app.
@@ -36,7 +38,12 @@ func (r *Results) startEdit(keep bool) {
 	if len(r.Rows) == 0 {
 		return
 	}
-	if r.CanEdit != nil {
+	if r.onDraft() {
+		if !r.draft.editable[r.curCol] {
+			r.Status = i18n.T("status.error.row.othercol")
+			return
+		}
+	} else if r.CanEdit != nil {
 		if err := r.CanEdit(r.curCol); err != nil {
 			r.Status = err.Error()
 			return
@@ -54,7 +61,11 @@ func (r *Results) startEdit(keep bool) {
 func (r *Results) updateEdit(msg tea.KeyMsg) {
 	switch msg.String() {
 	case "enter":
-		r.edit = &CellEdit{Row: r.curRow, Col: r.curCol, Value: string(r.editBuf)}
+		if r.onDraft() { // local until the row is inserted
+			r.setDraftCell(r.curCol, string(r.editBuf))
+		} else {
+			r.edit = &CellEdit{Row: r.curRow, Col: r.curCol, Value: string(r.editBuf)}
+		}
 		r.CancelEdit()
 	case "esc":
 		r.CancelEdit()

@@ -225,6 +225,25 @@ func updateCellCmd(client *db.Client, tab *resultTab, t db.EditTarget, keyVals [
 	}
 }
 
+// rowInsertedMsg is the outcome of the insertion of the draft row.
+type rowInsertedMsg struct {
+	tab    *resultTab
+	table  string
+	stored map[int]string // stored values by result column
+	err    error
+}
+
+// insertRowCmd runs the INSERT of the draft row and returns the stored row.
+func insertRowCmd(client *db.Client, tab *resultTab, t db.InsertTarget, values map[int]string) tea.Cmd {
+	return func() tea.Msg {
+		stored, err := client.InsertRow(context.Background(), t, values)
+		if err != nil {
+			log.Printf("insertion: %s.%s: %v", t.Schema, t.Table, err)
+		}
+		return rowInsertedMsg{tab: tab, table: t.Table, stored: stored, err: err}
+	}
+}
+
 type completionsMsg struct {
 	tables  []string
 	columns []string
@@ -438,6 +457,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.setOK(fmt.Sprintf(i18n.T("status.cell.updated"), msg.column, msg.value))
 		return a, nil
 
+	case rowInsertedMsg:
+		a.busy = false
+		if msg.err != nil { // the draft stays, to be fixed and retried
+			a.setErr(fmt.Sprintf(i18n.T("status.error.row"), msg.err.Error()))
+			return a, nil
+		}
+		msg.tab.res.CommitDraft(msg.stored)
+		a.setOK(fmt.Sprintf(i18n.T("status.row.inserted"), msg.table))
+		return a, nil
+
 	case editorFinishedMsg:
 		if msg.err != nil {
 			a.setErr(fmt.Sprintf(i18n.T("status.error.editor"), msg.err))
@@ -611,6 +640,11 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 		case ZoneResults:
+			if a.resIdle() && a.res.HasDraft() { // esc first discards the draft row
+				a.res.DiscardDraft()
+				a.setOK(i18n.T("status.row.discarded"))
+				return a, nil
+			}
 			if a.resIdle() {
 				a.setFocused(false)
 				return a, nil
@@ -658,6 +692,9 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if e := a.res.TakeEdit(); e != nil {
 			return a.applyCellEdit(e)
+		}
+		if act := a.res.TakeRowAction(); act != RowNone {
+			return a.applyRowAction(act)
 		}
 	}
 	return a, nil
@@ -732,6 +769,50 @@ func (a *App) applyCellEdit(e *CellEdit) (tea.Model, tea.Cmd) {
 	a.busy = true
 	a.setOK(i18n.T("status.cell.updating"))
 	return a, updateCellCmd(a.client, tab, target, keyVals, e.Col, e.Value)
+}
+
+// applyRowAction opens a draft row (new / duplicate) in the table the current
+// column comes from, or inserts the draft.
+func (a *App) applyRowAction(act RowAction) (tea.Model, tea.Cmd) {
+	if a.curTab >= len(a.tabs) || a.tabs[a.curTab].res != a.res || a.tabs[a.curTab].result == nil {
+		a.setErr(i18n.T("status.error.cell.computed"))
+		return a, nil
+	}
+	tab := a.tabs[a.curTab]
+	if a.client == nil || tab.connName != a.connName || tab.database != a.database {
+		a.setErr(i18n.T("status.error.cell.otherdb"))
+		return a, nil
+	}
+	if act == RowCommit {
+		a.busy = true
+		a.setOK(i18n.T("status.row.inserting"))
+		return a, insertRowCmd(a.client, tab, tab.insert, a.res.DraftValues())
+	}
+	target, err := tab.result.InsertTarget(a.res.CurCol())
+	if err != nil {
+		if errors.Is(err, db.ErrNotATable) {
+			a.setErr(i18n.T("status.error.cell.notatable"))
+		} else {
+			a.setErr(i18n.T("status.error.cell.computed"))
+		}
+		return a, nil
+	}
+	editable := map[int]bool{}
+	values := map[int]string{}
+	for _, c := range target.Cols {
+		if c.Generated {
+			continue
+		}
+		editable[c.Col] = true
+		// a copy keeps everything but the primary key (left to its default)
+		if act == RowDuplicate && !c.PK {
+			values[c.Col] = a.res.cell(a.res.CurRow(), c.Col)
+		}
+	}
+	tab.insert = target
+	a.res.StartDraft(editable, values)
+	a.setOK(fmt.Sprintf(i18n.T("status.row.draft"), target.Table))
+	return a, nil
 }
 
 func (a *App) handleHeaderKey(key string) {

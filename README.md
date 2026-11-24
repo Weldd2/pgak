@@ -151,6 +151,16 @@ Visual mode: motions and text objects extend the selection, `o` swaps the ends, 
 
   The cell must come from a table column (not an expression or a view) and the table's primary key column(s) must be in the result: `SELECT id, name FROM users` is editable, `SELECT name FROM users` or `SELECT upper(name) …` is not. The statement is `UPDATE table SET col = $1 WHERE pk = $2 RETURNING col`: the value is sent as text and cast by the server (a bad value is reported, nothing is changed); the displayed cell is refreshed with the stored value. Typing `NULL` stores SQL NULL. Values are displayed in the server's text form, like psql (`{1,2}` for arrays, json as is, `2024-01-02 03:04:05+01` for timestamps), so a displayed value is always a valid input.
 
+- Add or duplicate a row (runs an `INSERT` into the table of the current column):
+
+| Keys | Action |
+|---|---|
+| `o` | new draft row under the current one |
+| `p` | duplicate the current row as a draft (primary key left to its default) |
+| `i` / `c` · `x` | fill a draft cell · reset it to the column default |
+| `ctrl+s` / `esc` | insert the row / discard the draft |
+
+  Nothing is written until `ctrl+s`: the draft only lives in the grid. Cells left on `default` are omitted from the `INSERT`, so sequences and defaults apply; the inserted row is refreshed with the stored values (`RETURNING`). If the server refuses the row (NOT NULL, unique…), the draft stays so you can fix it. Generated columns and columns from other tables (joins) cannot be filled.
 
 - `q`: quit
 
@@ -362,6 +372,16 @@ Mode visuel : motions et objets de texte étendent la sélection, `o` échange l
 
   La cellule doit provenir d'une colonne de table (pas une expression ni une vue) et la ou les colonnes de la clé primaire doivent être dans le résultat : `SELECT id, name FROM users` est éditable, `SELECT name FROM users` ou `SELECT upper(name) …` ne l'est pas. La requête est `UPDATE table SET col = $1 WHERE pk = $2 RETURNING col` : la valeur est envoyée en texte et convertie par le serveur (une valeur invalide est signalée, rien n'est modifié) ; la cellule affichée est rafraîchie avec la valeur enregistrée. Saisir `NULL` enregistre un NULL SQL. Les valeurs sont affichées dans la forme texte du serveur, comme psql (`{1,2}` pour les tableaux, le json tel quel, `2024-01-02 03:04:05+01` pour les timestamps) : une valeur affichée est donc toujours une saisie valide.
 
+- Ajouter ou dupliquer une ligne (lance un `INSERT` dans la table de la colonne courante) :
+
+| Touches | Action |
+|---|---|
+| `o` | nouvelle ligne en brouillon sous la ligne courante |
+| `p` | dupliquer la ligne courante en brouillon (clé primaire laissée à sa valeur par défaut) |
+| `i` / `c` · `x` | remplir une cellule du brouillon · la remettre à la valeur par défaut |
+| `ctrl+s` / `esc` | insérer la ligne / abandonner le brouillon |
+
+  Rien n'est écrit avant `ctrl+s` : le brouillon ne vit que dans la grille. Les cellules laissées sur `défaut` sont omises de l'`INSERT` (séquences et valeurs par défaut s'appliquent) ; la ligne insérée est rafraîchie avec les valeurs enregistrées (`RETURNING`). Si le serveur refuse la ligne (NOT NULL, unicité…), le brouillon reste pour être corrigé. Les colonnes générées et celles d'autres tables (jointures) ne peuvent pas être remplies.
 
 - `q` : quitter
 

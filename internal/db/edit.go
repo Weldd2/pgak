@@ -24,7 +24,8 @@ type Table struct {
 	Kind   byte       // relkind: 'r' table, 'p' partitioned, 'v' view, …
 	PK     []TableCol // primary key columns (empty if none)
 
-	cols map[uint16]string // attnum → column name
+	cols      map[uint16]string // attnum → column name
+	generated map[uint16]bool   // attnum → GENERATED ALWAYS (not writable)
 }
 
 // TableCol is a column of a relation.
@@ -112,7 +113,7 @@ func (c *Client) loadTables(ctx context.Context, sources []ColumnSource) (map[ui
 	defer cancel()
 	out := map[uint32]Table{}
 	for oid := range oids {
-		t := Table{cols: map[uint16]string{}}
+		t := Table{cols: map[uint16]string{}, generated: map[uint16]bool{}}
 		err := c.conn.QueryRow(ctx,
 			`SELECT n.nspname, c.relname, c.relkind
 			 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -124,7 +125,8 @@ func (c *Client) loadTables(ctx context.Context, sources []ColumnSource) (map[ui
 			`SELECT a.attnum, a.attname,
 			        EXISTS (SELECT 1 FROM pg_index i
 			                WHERE i.indrelid = a.attrelid AND i.indisprimary
-			                  AND a.attnum = ANY (i.indkey)) AS pk
+			                  AND a.attnum = ANY (i.indkey)) AS pk,
+			        (a.attgenerated <> '' OR a.attidentity = 'a') AS generated
 			 FROM pg_attribute a
 			 WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped
 			 ORDER BY a.attnum`, oid)
@@ -133,12 +135,15 @@ func (c *Client) loadTables(ctx context.Context, sources []ColumnSource) (map[ui
 		}
 		for rows.Next() {
 			var col TableCol
-			var pk bool
-			if err := rows.Scan(&col.AttNum, &col.Name, &pk); err != nil {
+			var pk, generated bool
+			if err := rows.Scan(&col.AttNum, &col.Name, &pk, &generated); err != nil {
 				rows.Close()
 				return nil, err
 			}
 			t.cols[col.AttNum] = col.Name
+			if generated {
+				t.generated[col.AttNum] = true
+			}
 			if pk {
 				t.PK = append(t.PK, col)
 			}

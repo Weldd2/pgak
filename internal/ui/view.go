@@ -286,6 +286,12 @@ func resultsHelp() string {
 		i18n.T("results.help.edit.null"),
 		i18n.T("results.help.edit.require"),
 		"",
+		section.Render(i18n.T("results.help.row")),
+		i18n.T("results.help.row.start"),
+		i18n.T("results.help.row.edit"),
+		i18n.T("results.help.row.commit"),
+		i18n.T("results.help.row.pk"),
+		"",
 		section.Render(i18n.T("results.help.misc")),
 		i18n.T("results.help.misc.esc"),
 		"",
@@ -381,6 +387,8 @@ func (a *App) statusBar() string {
 		hints = i18n.T("statusbar.hints.window")
 	case a.zone == ZoneResults && a.res.Editing():
 		hints = i18n.T("statusbar.hints.celledit")
+	case a.zone == ZoneResults && a.res.HasDraft():
+		hints = i18n.T("statusbar.hints.draft")
 	case a.zone == ZoneResults:
 		hints = i18n.T("statusbar.hints.results") + hints
 	}

@@ -825,3 +825,120 @@ func TestConnFormPasswordMaskedAndReturned(t *testing.T) {
 		t.Fatal("password_env must be preserved")
 	}
 }
+
+func TestResultsDraftRow(t *testing.T) {
+	i18n.SetLanguage("fr")
+	r := NewResults()
+	r.SetSize(80, 8)
+	r.SetFocused(true)
+	r.SetData([]string{"id", "name", "calc"}, [][]string{{"1", "ab", "x"}, {"2", "cd", "y"}})
+	k := func(keys ...string) {
+		for _, s := range keys {
+			switch s {
+			case "enter":
+				r.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			case "ctrl+s":
+				r.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+			default:
+				r.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)})
+			}
+		}
+	}
+	k("ctrl+s")
+	if r.TakeRowAction() != RowNone {
+		t.Fatal("ctrl+s without a draft does nothing")
+	}
+	k("p")
+	if r.TakeRowAction() != RowDuplicate || r.TakeRowAction() != RowNone {
+		t.Fatal("p should request a duplicate, once")
+	}
+	// the app answers with a draft: copy of row 0 without its key
+	editable := map[int]bool{0: true, 1: true}
+	r.StartDraft(editable, map[int]string{1: "ab"})
+	if len(r.Rows) != 3 || r.curRow != 1 || !r.HasDraft() || r.cell(2, 0) != "2" {
+		t.Fatalf("draft not inserted under the cursor: %v cur=%d", r.Rows, r.curRow)
+	}
+	if !strings.Contains(r.View(), "déf") { // truncated to the column width
+		t.Fatal("unset cells should show the default placeholder")
+	}
+	// cells are edited locally, no CellEdit is emitted
+	k("l", "i", "Z", "enter")
+	if r.TakeEdit() != nil || r.cell(1, 1) != "abZ" {
+		t.Fatalf("local edit: %q", r.cell(1, 1))
+	}
+	// columns of another table / computed are refused
+	k("l", "i")
+	if r.Editing() || r.Status == "" {
+		t.Fatal("non-editable draft column should be refused")
+	}
+	// x resets to default; a second draft is refused
+	k("h", "h", "i", "9", "enter")
+	if got := r.DraftValues(); len(got) != 2 || got[0] != "9" || got[1] != "abZ" {
+		t.Fatalf("values: %v", got)
+	}
+	k("x")
+	if got := r.DraftValues(); len(got) != 1 || got[1] != "abZ" {
+		t.Fatalf("values after x: %v", got)
+	}
+	k("o")
+	if r.TakeRowAction() != RowNone || r.Status == "" {
+		t.Fatal("only one draft at a time")
+	}
+	k("ctrl+s")
+	if r.TakeRowAction() != RowCommit {
+		t.Fatal("ctrl+s should commit the draft")
+	}
+	r.CommitDraft(map[int]string{0: "3", 1: "abZ"})
+	if r.HasDraft() || r.cell(1, 0) != "3" || len(r.Rows) != 3 {
+		t.Fatalf("commit: %v", r.Rows)
+	}
+	// regular rows emit edits again
+	k("i", "enter")
+	if r.TakeEdit() == nil {
+		t.Fatal("committed row should be a regular row")
+	}
+
+	// discard restores the rows; works on an empty result too
+	r.SetData([]string{"id"}, nil)
+	k("p")
+	if r.TakeRowAction() != RowNone {
+		t.Fatal("nothing to duplicate in an empty result")
+	}
+	k("o")
+	if r.TakeRowAction() != RowNew {
+		t.Fatal("o should request a new row")
+	}
+	r.StartDraft(map[int]bool{0: true}, nil)
+	r.View()
+	r.DiscardDraft()
+	if r.HasDraft() || len(r.Rows) != 0 || r.curRow != 0 {
+		t.Fatalf("discard: %v cur=%d", r.Rows, r.curRow)
+	}
+	r.View()
+}
+
+func TestAppDraftRowEsc(t *testing.T) {
+	a := newTestApp()
+	a.res.SetData([]string{"id", "v"}, [][]string{{"1", "a"}})
+	a.layout()
+	press(a, "j", "enter") // focus results
+	// without a backing table the request is refused
+	press(a, "o")
+	if !a.statusErr || a.res.HasDraft() {
+		t.Fatalf("o without a table: status=%q", a.status)
+	}
+	a.res.StartDraft(map[int]bool{0: true, 1: true}, nil)
+	a.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
+	if !strings.Contains(a.View(), "ctrl+s insérer") {
+		t.Fatal("draft hints missing")
+	}
+	// esc discards the draft first, then leaves the zone
+	press(a, "esc")
+	if a.res.HasDraft() || !a.focused || len(a.res.Rows) != 1 {
+		t.Fatal("first esc should only discard the draft")
+	}
+	press(a, "esc")
+	if a.focused {
+		t.Fatal("second esc should go back to window mode")
+	}
+}

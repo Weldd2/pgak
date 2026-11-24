@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"pgak/internal/config"
 )
@@ -17,6 +18,12 @@ type Result struct {
 	Affected int64
 	Duration time.Duration
 	IsSelect bool
+
+	// Origin of each column and the referenced tables, for cell editing
+	// (see EditTarget). Tables is nil when the lookup failed.
+	Sources []ColumnSource
+	Tables  map[uint32]Table
+	Types   []uint32 // data type OID of each column
 }
 
 // Client wraps a single pgx connection to one database.
@@ -61,10 +68,15 @@ func (c *Client) SetSearchPath(ctx context.Context, schema string) error {
 	return err
 }
 
+// textFormat asks the server for the text representation of every column:
+// values are displayed exactly as psql does (arrays as {1,2}, json, numeric,
+// timestamps…) and can be sent back as-is when a cell is edited.
+var textFormat = pgx.QueryResultFormats{pgx.TextFormatCode}
+
 // Query runs an arbitrary SQL statement and renders every value as a string.
 func (c *Client) Query(ctx context.Context, sql string) (*Result, error) {
 	start := time.Now()
-	rows, err := c.conn.Query(ctx, sql)
+	rows, err := c.conn.Query(ctx, sql, textFormat)
 	if err != nil {
 		return nil, err
 	}
@@ -72,19 +84,20 @@ func (c *Client) Query(ctx context.Context, sql string) (*Result, error) {
 
 	fields := rows.FieldDescriptions()
 	cols := make([]string, len(fields))
+	sources := make([]ColumnSource, len(fields))
+	types := make([]uint32, len(fields))
 	for i, f := range fields {
+		types[i] = f.DataTypeOID
 		cols[i] = f.Name
+		sources[i] = ColumnSource{TableOID: f.TableOID, AttNum: f.TableAttributeNumber}
 	}
 
 	var out [][]string
 	for rows.Next() {
-		vals, err := rows.Values()
-		if err != nil {
-			return nil, err
-		}
-		row := make([]string, len(vals))
-		for i, v := range vals {
-			row[i] = renderValue(v)
+		raw := rows.RawValues()
+		row := make([]string, len(raw))
+		for i, v := range raw {
+			row[i] = renderText(v, fields[i].DataTypeOID)
 		}
 		out = append(out, row)
 	}
@@ -92,26 +105,38 @@ func (c *Client) Query(ctx context.Context, sql string) (*Result, error) {
 		return nil, err
 	}
 	tag := rows.CommandTag()
-	return &Result{
+	rows.Close() // the connection must be free before the catalog lookups
+	res := &Result{
 		Columns:  cols,
 		Rows:     out,
 		Affected: tag.RowsAffected(),
 		Duration: time.Since(start),
 		IsSelect: tag.Select(),
-	}, nil
+		Sources:  sources,
+		Types:    types,
+	}
+	// best effort: without table info the cells are simply not editable
+	if tables, err := c.loadTables(ctx, sources); err == nil {
+		res.Tables = tables
+	}
+	return res, nil
 }
 
-func renderValue(v any) string {
-	switch x := v.(type) {
-	case nil:
-		return "NULL"
-	case []byte:
-		return fmt.Sprintf("\\x%x", x)
-	case time.Time:
-		return x.Format(time.RFC3339)
-	default:
-		return fmt.Sprintf("%v", x)
+// renderText turns the server text representation of a value into the
+// displayed string. NULL is shown as NULL, booleans as true/false.
+func renderText(raw []byte, oid uint32) string {
+	if raw == nil {
+		return NullLiteral
 	}
+	if oid == pgtype.BoolOID {
+		switch string(raw) {
+		case "t":
+			return "true"
+		case "f":
+			return "false"
+		}
+	}
+	return string(raw)
 }
 
 // ListDatabases returns non-template databases.

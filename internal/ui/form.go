@@ -17,6 +17,7 @@ import (
 // esc closes. Insert mode: type, esc back to normal.
 type ConnForm struct {
 	OldName string // empty = new connection
+	old     config.Connection
 	fields  []formField
 	cursor  int
 	insert  bool
@@ -37,13 +38,17 @@ type formField struct {
 	value       string
 	placeholder string // dim example shown when empty
 	desc        string // help text shown when the field is selected
+	secret      bool   // value is masked on screen
 }
+
+const passwordField = 4
 
 // FormResult is emitted when the form closes.
 type FormResult struct {
 	Canceled bool
 	OldName  string
 	Conn     config.Connection
+	Password string // stored in the OS keychain, never in the config file
 }
 
 func NewConnForm(old *config.Connection) *ConnForm {
@@ -58,22 +63,24 @@ func NewConnForm(old *config.Connection) *ConnForm {
 	if old != nil {
 		c = *old
 		f.OldName = old.Name
+		f.old = *old
 	}
 	f.fields = []formField{
-		{i18n.T("form.field.name"), c.Name, i18n.T("form.placeholder.name"),
-			i18n.T("form.desc.name")},
-		{i18n.T("form.field.host"), c.Host, i18n.T("form.placeholder.host"),
-			i18n.T("form.desc.host")},
-		{i18n.T("form.field.port"), strconv.Itoa(defaultPort(c.Port)), i18n.T("form.placeholder.port"),
-			i18n.T("form.desc.port")},
-		{i18n.T("form.field.user"), c.User, i18n.T("form.placeholder.user"),
-			i18n.T("form.desc.user")},
-		{i18n.T("form.field.password"), c.PasswordEnv, i18n.T("form.placeholder.password"),
-			i18n.T("form.desc.password")},
-		{i18n.T("form.field.database"), c.Database, i18n.T("form.placeholder.database"),
-			i18n.T("form.desc.database")},
-		{i18n.T("form.field.sslmode"), defaultStr(c.SSLMode, "prefer"), i18n.T("form.placeholder.sslmode"),
-			i18n.T("form.desc.sslmode")},
+		{label: i18n.T("form.field.name"), value: c.Name, placeholder: i18n.T("form.placeholder.name"),
+			desc: i18n.T("form.desc.name")},
+		{label: i18n.T("form.field.host"), value: c.Host, placeholder: i18n.T("form.placeholder.host"),
+			desc: i18n.T("form.desc.host")},
+		{label: i18n.T("form.field.port"), value: strconv.Itoa(defaultPort(c.Port)), placeholder: i18n.T("form.placeholder.port"),
+			desc: i18n.T("form.desc.port")},
+		{label: i18n.T("form.field.user"), value: c.User, placeholder: i18n.T("form.placeholder.user"),
+			desc: i18n.T("form.desc.user")},
+		{label: i18n.T("form.field.password"), value: config.StoredPassword(f.OldName),
+			placeholder: i18n.T("form.placeholder.password"),
+			desc:        i18n.T("form.desc.password"), secret: true},
+		{label: i18n.T("form.field.database"), value: c.Database, placeholder: i18n.T("form.placeholder.database"),
+			desc: i18n.T("form.desc.database")},
+		{label: i18n.T("form.field.sslmode"), value: defaultStr(c.SSLMode, "prefer"), placeholder: i18n.T("form.placeholder.sslmode"),
+			desc: i18n.T("form.desc.sslmode")},
 	}
 	return f
 }
@@ -106,7 +113,7 @@ func (f *ConnForm) connection() (config.Connection, string) {
 		Host:        strings.TrimSpace(f.fields[1].value),
 		Port:        port,
 		User:        strings.TrimSpace(f.fields[3].value),
-		PasswordEnv: strings.TrimSpace(f.fields[4].value),
+		PasswordEnv: f.old.PasswordEnv, // legacy fallback, only editable in the JSON
 		Database:    strings.TrimSpace(f.fields[5].value),
 		SSLMode:     strings.TrimSpace(f.fields[6].value),
 	}
@@ -133,7 +140,7 @@ func (f *ConnForm) Update(msg tea.KeyMsg) *FormResult {
 			f.Err = errMsg
 			return nil
 		}
-		return &FormResult{OldName: f.OldName, Conn: c}
+		return &FormResult{OldName: f.OldName, Conn: c, Password: f.fields[passwordField].value}
 	}
 
 	if f.insert {
@@ -194,16 +201,20 @@ func (f *ConnForm) View() string {
 
 	for i, fld := range f.fields {
 		marker := "  "
-		val := fld.value
+		shown := fld.value
+		if fld.secret {
+			shown = strings.Repeat("•", len([]rune(fld.value)))
+		}
+		val := shown
 		if val == "" && !(i == f.cursor && f.insert) {
 			val = f.dimStyle.Render(fld.placeholder)
 		}
 		if i == f.cursor {
 			marker = f.curStyle.Render("▸") + " "
 			if f.insert {
-				val = fld.value + f.curStyle.Render(" ")
-			} else if fld.value != "" {
-				val = f.curStyle.Render(fld.value)
+				val = shown + f.curStyle.Render(" ")
+			} else if shown != "" {
+				val = f.curStyle.Render(shown)
 			}
 		}
 		sb.WriteString(marker + f.labStyle.Render(fld.label) + " " + val)

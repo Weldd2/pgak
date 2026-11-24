@@ -9,8 +9,10 @@ import (
 )
 
 // Connection describes a saved postgres connection.
-// The password is never stored directly: PasswordEnv holds the name of an
-// environment variable containing the password.
+// The password is never stored in the config file: it lives in the OS
+// keychain (see secret.go). PasswordEnv is the legacy alternative: the name of
+// an environment variable containing the password, used when the keychain has
+// no entry (handy for CI / headless machines).
 type Connection struct {
 	Name        string `json:"name"`
 	Host        string `json:"host"`
@@ -21,8 +23,11 @@ type Connection struct {
 	SSLMode     string `json:"sslmode,omitempty"`
 }
 
-// Password resolves the password from the environment.
+// Password resolves the password: keychain first, then PasswordEnv.
 func (c Connection) Password() string {
+	if pw := StoredPassword(c.Name); pw != "" {
+		return pw
+	}
 	if c.PasswordEnv == "" {
 		return ""
 	}

@@ -18,6 +18,7 @@ import (
 type Results struct {
 	Cols []string
 	Rows [][]string
+	Err  string // error message shown instead of a table (failed statement)
 
 	curRow, curCol       int
 	scrollRow, scrollCol int
@@ -27,15 +28,31 @@ type Results struct {
 	pendingG bool
 	count    int // count prefix (0 = none)
 
-	searching                  bool   // typing in the / prompt
-	searchInput                string // text being typed
-	searchQuery                string // committed (or live) query
-	searchOrigRow, searchOrigCol int  // cursor position when / was pressed
+	searching                    bool   // typing in the / prompt
+	searchInput                  string // text being typed
+	searchQuery                  string // committed (or live) query
+	searchOrigRow, searchOrigCol int    // cursor position when / was pressed
 
 	width, height int
 	focused       bool
 
 	Status string // transient message (yank feedback), read by the app
+
+	// cell editing (i / c): CanEdit, when set, vetoes the edition of a
+	// column with a user-facing error; edit holds the committed value
+	CanEdit func(col int) error
+	// InsertSQL, when set, renders rows as an INSERT statement for the table
+	// column col comes from (yi / yI)
+	InsertSQL func(col int, rows [][]string) string
+	editing   bool
+	editBuf   []rune
+	editCur   int
+	edit      *CellEdit
+
+	// row insertion (o / p): see results_draft.go
+	draft      *draftRow
+	rowAction  RowAction
+	draftStyle lipgloss.Style
 
 	headStyle  lipgloss.Style
 	cellStyle  lipgloss.Style
@@ -43,6 +60,10 @@ type Results struct {
 	rowStyle   lipgloss.Style
 	dimStyle   lipgloss.Style
 	matchStyle lipgloss.Style
+	errStyle   lipgloss.Style
+
+	editStyle    lipgloss.Style
+	editCurStyle lipgloss.Style
 }
 
 func NewResults() *Results {
@@ -52,6 +73,11 @@ func NewResults() *Results {
 		rowStyle:   lipgloss.NewStyle().Background(lipgloss.Color("236")),
 		dimStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
 		matchStyle: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("221")),
+		errStyle:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("203")),
+
+		draftStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("114")),
+		editStyle:    lipgloss.NewStyle().Background(lipgloss.Color("71")).Foreground(lipgloss.Color("231")),
+		editCurStyle: lipgloss.NewStyle().Reverse(true),
 	}
 }
 
@@ -66,10 +92,13 @@ func (r *Results) SetFocused(b bool) { r.focused = b }
 func (r *Results) SetData(cols []string, rows [][]string) {
 	r.Cols = cols
 	r.Rows = rows
+	r.Err = ""
 	r.curRow, r.curCol = 0, 0
 	r.scrollRow, r.scrollCol = 0, 0
 	r.pendingY, r.pendingG = false, false
 	r.searching, r.searchInput, r.searchQuery = false, "", ""
+	r.CancelEdit()
+	r.draft, r.rowAction = nil, RowNone
 	r.widths = make([]int, len(cols))
 	for i, c := range cols {
 		r.widths[i] = clampInt(runewidth.StringWidth(c), minColWidth, maxColWidth)
@@ -85,6 +114,12 @@ func (r *Results) SetData(cols []string, rows [][]string) {
 			}
 		}
 	}
+}
+
+// SetError makes the view display an error message instead of a table.
+func (r *Results) SetError(msg string) {
+	r.SetData(nil, nil)
+	r.Err = msg
 }
 
 func (r *Results) Empty() bool { return len(r.Cols) == 0 }
@@ -138,6 +173,10 @@ func (r *Results) Update(msg tea.KeyMsg) {
 		r.updateSearch(msg)
 		return
 	}
+	if r.editing {
+		r.updateEdit(msg)
+		return
+	}
 
 	if r.pendingY {
 		r.pendingY = false
@@ -179,6 +218,35 @@ func (r *Results) Update(msg tea.KeyMsg) {
 		r.searchOrigRow, r.searchOrigCol = r.curRow, r.curCol
 		r.count = 0
 		return
+	case "i", "enter": // edit the cell
+		r.count = 0
+		r.startEdit(true)
+		return
+	case "c": // change the cell (start from an empty value)
+		r.count = 0
+		r.startEdit(false)
+		return
+	case "o", "p", "ctrl+s": // new row / duplicate row / insert the draft
+		r.count = 0
+		switch {
+		case key == "ctrl+s":
+			if r.draft != nil {
+				r.rowAction = RowCommit
+			}
+		case r.draft != nil:
+			r.Status = i18n.T("status.row.draftexists")
+		case key == "o":
+			r.rowAction = RowNew
+		case len(r.Rows) > 0:
+			r.rowAction = RowDuplicate
+		}
+		return
+	case "x": // draft row: back to the column default
+		r.count = 0
+		if r.onDraft() {
+			r.resetDraftCell(r.curCol)
+		}
+		return
 	case "n":
 		r.jumpMatch(r.takeCount())
 	case "N":
@@ -213,9 +281,9 @@ func (r *Results) Update(msg tea.KeyMsg) {
 		r.curRow = clampInt(r.curRow+r.pageSize(), 0, len(r.Rows)-1)
 	case "ctrl+b", "pgup":
 		r.curRow = clampInt(r.curRow-r.pageSize(), 0, len(r.Rows)-1)
-	case "H": // top of screen
+	case "K": // top of screen
 		r.curRow = clampInt(r.scrollRow, 0, len(r.Rows)-1)
-	case "L": // bottom of screen
+	case "J": // bottom of screen
 		r.curRow = clampInt(r.scrollRow+r.pageSize()-1, 0, len(r.Rows)-1)
 	case "M": // middle of screen
 		r.curRow = clampInt(r.scrollRow+r.pageSize()/2, 0, len(r.Rows)-1)
@@ -287,6 +355,25 @@ func (r *Results) yank(key string) {
 		}
 		text = sb.String()
 		what = i18n.T("yank.all")
+	case "i", "I": // ligne / toutes les lignes en INSERT
+		if r.InsertSQL == nil {
+			return
+		}
+		rows := [][]string{r.Rows[r.curRow]}
+		what = i18n.T("yank.insert")
+		if key == "I" {
+			rows = rows[:0]
+			for i, row := range r.Rows {
+				if r.draft == nil || i != r.draft.row {
+					rows = append(rows, row)
+				}
+			}
+			what = i18n.T("yank.insertall")
+		}
+		if len(rows) == 0 {
+			return
+		}
+		text = r.InsertSQL(r.curCol, rows)
 	default:
 		return
 	}
@@ -440,6 +527,9 @@ func (r *Results) visibleWidth(a, b int) int {
 }
 
 func (r *Results) View() string {
+	if r.Err != "" {
+		return r.errStyle.Render(i18n.T("results.error")) + " " + r.Err
+	}
 	if r.Empty() {
 		return r.dimStyle.Render(i18n.T("results.empty"))
 	}
@@ -475,7 +565,23 @@ func (r *Results) View() string {
 		for c := r.scrollCol; c < len(r.Cols); c++ {
 			cell := padCell(r.cell(idx, c), r.widths[c])
 			matched := r.matchesSearch(idx, c)
+			isDraft := r.draft != nil && idx == r.draft.row
+			unset := isDraft && !r.draft.set[c]
+			if unset {
+				cell = padCell(r.draftPlaceholder(c), r.widths[c])
+			}
 			switch {
+			case r.editing && idx == r.curRow && c == r.curCol:
+				ln.WriteString(r.editView(r.widths[c]))
+			case isDraft && !(r.focused && idx == r.curRow && c == r.curCol):
+				st := r.draftStyle
+				if unset {
+					st = r.dimStyle
+				}
+				if r.focused && idx == r.curRow {
+					st = st.Background(lipgloss.Color("236"))
+				}
+				ln.WriteString(st.Render(cell))
 			case r.focused && idx == r.curRow && c == r.curCol:
 				ln.WriteString(r.curStyle.Render(cell))
 			case matched && r.focused && idx == r.curRow:

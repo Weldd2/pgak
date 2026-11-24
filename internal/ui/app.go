@@ -251,9 +251,9 @@ func completionsCmd(client *db.Client, schema string) tea.Cmd {
 func connectCmd(c config.Connection, database string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		log.Printf("connexion: name=%s host=%s port=%d user=%s db=%s sslmode=%s password_env=%s",
-			c.Name, c.Host, c.Port, c.User, database, c.SSLMode, c.PasswordEnv)
-		if c.PasswordEnv != "" && os.Getenv(c.PasswordEnv) == "" {
+		log.Printf("connexion: name=%s host=%s port=%d user=%s db=%s sslmode=%s",
+			c.Name, c.Host, c.Port, c.User, database, c.SSLMode)
+		if c.PasswordEnv != "" && c.Password() == "" {
 			err := fmt.Errorf(i18n.T("status.error.envvar"), c.PasswordEnv)
 			log.Printf("connexion: %v", err)
 			return connectedMsg{connName: c.Name, err: err}
@@ -498,8 +498,13 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.form = nil
 			if !res.Canceled {
 				a.cfg.Upsert(res.OldName, res.Conn)
+				if res.OldName != "" && res.OldName != res.Conn.Name {
+					_ = config.DeleteStoredPassword(res.OldName)
+				}
 				if err := a.cfg.Save(); err != nil {
 					a.setErr(fmt.Sprintf(i18n.T("status.error.configsave"), err.Error()))
+				} else if err := config.SetStoredPassword(res.Conn.Name, res.Password); err != nil {
+					a.setErr(fmt.Sprintf(i18n.T("status.error.keychain"), err.Error()))
 				} else {
 					a.setOK(fmt.Sprintf(i18n.T("status.saved"), res.Conn.Name))
 				}
@@ -920,6 +925,7 @@ func (a *App) handleModalResult(res *SelectResult) (tea.Model, tea.Cmd) {
 			if res.HasItem {
 				name := res.Item.Value.(string)
 				a.cfg.Delete(name)
+				_ = config.DeleteStoredPassword(name)
 				if err := a.cfg.Save(); err != nil {
 					a.setErr(fmt.Sprintf(i18n.T("status.error.configsave"), err.Error()))
 				} else {

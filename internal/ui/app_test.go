@@ -808,3 +808,20 @@ func TestAppCellEditKeys(t *testing.T) {
 		t.Fatal("zone change should cancel the edition")
 	}
 }
+
+func TestConnFormPasswordMaskedAndReturned(t *testing.T) {
+	_ = config.SetStoredPassword("kc", "hunter2")
+	defer config.DeleteStoredPassword("kc")
+	f := NewConnForm(&config.Connection{Name: "kc", Host: "h", Port: 5432, User: "u", PasswordEnv: "LEGACY"})
+	f.SetSize(60, 20)
+	if v := f.View(); strings.Contains(v, "hunter2") || !strings.Contains(v, "•••••••") {
+		t.Fatalf("password must be masked:\n%s", v)
+	}
+	res := f.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if res == nil || res.Password != "hunter2" {
+		t.Fatalf("password should round-trip, got %+v", res)
+	}
+	if res.Conn.PasswordEnv != "LEGACY" {
+		t.Fatal("password_env must be preserved")
+	}
+}

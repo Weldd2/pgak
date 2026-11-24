@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.10.1
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/mattn/go-runewidth v0.0.16
+	github.com/zalando/go-keyring v0.2.8
 )
 
 require (
@@ -16,7 +17,9 @@ require (
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
+	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect

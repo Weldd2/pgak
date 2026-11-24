@@ -36,7 +36,6 @@ JSON file (`$XDG_CONFIG_HOME/pgak/config.json`, e.g., `~/Library/Application Sup
       "host": "localhost",
       "port": 5432,
       "user": "postgres",
-      "password_env": "",
       "database": "postgres",
       "sslmode": "prefer"
     },
@@ -45,7 +44,6 @@ JSON file (`$XDG_CONFIG_HOME/pgak/config.json`, e.g., `~/Library/Application Sup
       "host": "staging.example.com",
       "port": 5432,
       "user": "app",
-      "password_env": "PGAK_DB_PASSWORD",
       "database": "app",
       "sslmode": "require"
     }
@@ -53,7 +51,9 @@ JSON file (`$XDG_CONFIG_HOME/pgak/config.json`, e.g., `~/Library/Application Sup
 }
 ```
 
-Passwords are **never** stored: `password_env` contains the name of an environment variable read at connection time.
+Passwords are **never** written to this file: type them in the connection form (masked) and they are stored in the OS keychain (macOS Keychain, Secret Service on Linux, Credential Manager on Windows), under the service `pgak`.
+
+For headless/CI use, an optional `"password_env": "PGAK_DB_PASSWORD"` field (JSON only) names an environment variable used when the keychain has no entry for the connection.
 
 ## Keybinds
 
@@ -198,7 +198,7 @@ tail -f ~/Library/Application\ Support/pgak/pgak.log
 
 Common pitfalls:
 - **Docker container**: check the *mapped* port (`docker ps`), e.g., `0.0.0.0:5434->5432/tcp` → connect on port **5434**, not 5432.
-- **Password**: if `password_env` is set but the variable isn't exported in the shell that launches pgak, the connection is refused with an explicit message.
+- **Password**: edit the connection (`e`) and type it in the form — it goes to the OS keychain. On Linux this needs a running Secret Service (gnome-keyring, KWallet…); otherwise use `password_env`.
 
 ## Tests
 
@@ -247,7 +247,6 @@ Fichier JSON (`$XDG_CONFIG_HOME/pgak/config.json`, soit `~/Library/Application S
       "host": "localhost",
       "port": 5432,
       "user": "postgres",
-      "password_env": "",
       "database": "postgres",
       "sslmode": "prefer"
     },
@@ -256,7 +255,6 @@ Fichier JSON (`$XDG_CONFIG_HOME/pgak/config.json`, soit `~/Library/Application S
       "host": "staging.example.com",
       "port": 5432,
       "user": "app",
-      "password_env": "PGAK_DB_PASSWORD",
       "database": "app",
       "sslmode": "require"
     }
@@ -264,7 +262,9 @@ Fichier JSON (`$XDG_CONFIG_HOME/pgak/config.json`, soit `~/Library/Application S
 }
 ```
 
-Les mots de passe ne sont **jamais** stockés : `password_env` contient le nom d'une variable d'environnement lue à la connexion.
+Les mots de passe ne sont **jamais** écrits dans ce fichier : saisissez-les dans le formulaire de connexion (masqués), ils sont stockés dans le trousseau du système (Trousseau macOS, Secret Service sous Linux, Credential Manager sous Windows), sous le service `pgak`.
+
+Pour un usage headless/CI, un champ optionnel `"password_env": "PGAK_DB_PASSWORD"` (JSON uniquement) désigne une variable d'environnement utilisée quand le trousseau n'a pas d'entrée pour la connexion.
 
 ## Keybinds
 
@@ -409,7 +409,7 @@ tail -f ~/Library/Application\ Support/pgak/pgak.log
 
 Pièges classiques :
 - **Container Docker** : vérifier le port *mappé* (`docker ps`), ex. `0.0.0.0:5434->5432/tcp` → se connecter sur le port **5434**, pas 5432.
-- **Mot de passe** : si `password_env` est renseigné mais que la variable n'est pas exportée dans le shell qui lance pgak, la connexion est refusée avec un message explicite.
+- **Mot de passe** : éditez la connexion (`e`) et saisissez-le dans le formulaire — il part dans le trousseau du système. Sous Linux, il faut un Secret Service actif (gnome-keyring, KWallet…) ; sinon utilisez `password_env`.
 
 ## Tests
 

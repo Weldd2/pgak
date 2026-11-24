@@ -197,7 +197,7 @@ func TestCW(t *testing.T) {
 	if e.Mode() != Insert {
 		t.Fatal("cw should enter insert")
 	}
-	typeText(e, "baz ")
+	typeText(e, "baz") // vim: cw does not eat the blank after the word
 	key(e, "esc")
 	if e.Value() != "baz bar" {
 		t.Fatalf("got %q", e.Value())
@@ -294,8 +294,8 @@ func TestQuoteObjects(t *testing.T) {
 		t.Fatalf("ci': got %q", e.Value())
 	}
 	e.SetValue(`say "hello world" now`)
-	key(e, "f", "h", "d", "a", `"`)
-	if e.Value() != `say  now` {
+	key(e, "f", "h", "d", "a", `"`) // a" includes the trailing blank (vim)
+	if e.Value() != `say now` {
 		t.Fatalf(`da": got %q`, e.Value())
 	}
 }

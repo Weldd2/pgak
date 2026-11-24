@@ -90,12 +90,40 @@ The selected window has a yellow border; the focused window takes its zone color
 
 ### Query editor (red) — vim
 
-- Modes: normal / insert / visual / visual-line
-- Movement: `h j k l`, `w b e`, `0 ^ $`, `gg G`, counts (`3w`, `2j`…)
-- Operators: `d`, `y`, `c` + motion (`dd`, `dw`, `d$`, `yy`, `cw`, `cc`…)
-- Editing: `i a I A o O`, `x`, `D`, `C`, `s`, `r`, `J`, `p P`
-- `u` undo, `ctrl+r` redo
-- `v` / `V` visual, then `y`/`d`/`c`
+Modes: normal / insert / replace (`R`) / visual (`v`) / visual-line (`V`). Every motion below works on its own, after an operator (`d3w`, `c)`, `y%`, `>}`…) and in visual mode. Counts combine (`2d3w` deletes 6 words).
+
+| Motions | Keys |
+|---|---|
+| chars / lines | `h j k l`, arrows, `space` / `backspace`, `+` / `enter` / `-` / `_` (first non-blank of next / previous / nth line) |
+| line | `0 ^ $ g_ \|` (`3\|` column 3, `2$` end of next line), `gm` middle |
+| words / WORDs | `w b e ge` · `W B E gE` |
+| find on line | `f F t T` + char, `;` / `,` repeat |
+| buffer | `gg G` (with count: line n), `N%` (percent), `H M L` (screen top / middle / bottom) |
+| scroll | `ctrl+d` / `ctrl+u` (half page), `ctrl+f` / `ctrl+b` (page), `zt zz zb` |
+| paragraphs / sentences | `{ }` · `( )` |
+| brackets | `%` (match), `[(` `[{` `])` `]}` (enclosing unmatched bracket) |
+| search | `/` `?` + text + `↵` (smartcase), `n` / `N`, `*` / `#` (word under cursor), `g*` / `g#` |
+| marks | `m{a-z}` set, `'{a-z}` (line) / `` `{a-z} `` (exact), `''` / ` `` ` back to the position before the last jump |
+
+| Operators | Keys |
+|---|---|
+| delete / yank / change | `d` `y` `c` + motion or text object; doubled on lines: `dd yy cc` |
+| indent | `>` `<` (`>>`, `3>>`, `>}`) |
+| case | `g~` toggle, `gu` lower, `gU` upper (`g~~ guu gUU` on the line), `~` on the char |
+| shortcuts | `x X s S D C Y`, `r` + char (`3rx`), `J` / `gJ` join (with count), `p P gp gP` paste (`gp`: cursor after) |
+| repeat | `.` repeats the last change (`3.` with a new count), `u` undo, `ctrl+r` redo |
+
+Text objects (after `d y c g~ gu gU` or in visual mode, `i` inner / `a` around): `w W` word / WORD, `s` sentence, `p` paragraph, `" ' `` ` `` quotes, `( ) b`, `{ } B`, `[ ]`, `< >` brackets (multi-line, nesting-aware).
+
+Special cases follow vim: `cw` acts like `ce`, `dw` on the last word of a line keeps the line break, exclusive motions ending in column 1 become linewise (`d}`), `cc`/`S`/`o`/`O` keep the indent.
+
+Insert mode: `ctrl+w` delete the word before the cursor, `ctrl+u` delete to the start of the line, `ctrl+n` completion, `tab` 4 spaces. Entering insert: `i a I A gI o O gi` (`gi`: where insert mode was last left).
+
+Visual mode: motions and text objects extend the selection, `o` swaps the ends, `gv` reselects. Then `y d x c s` · `Y D X C S R` (linewise) · `> <` (with count) · `~ u U` · `J gJ` · `r` + char · `p` (replace with the register, the replaced text goes to the register).
+
+- `esc`: insert → normal → window mode (in a modal: normal → close)
+- Yanks also go to the system clipboard
+- Not implemented: block visual (`ctrl+v`), named registers, macros, `=`, `:` commands. `ctrl+e`, `ctrl+o`, `ctrl+p`, `ctrl+t`, `ctrl+j`, `ctrl+k` are application shortcuts.
 - `esc`: insert → normal → window mode (in a modal: normal → close)
 - Yanks also go to the system clipboard
 
@@ -248,12 +276,40 @@ La fenêtre sélectionnée a une bordure jaune ; la fenêtre focus prend la coul
 
 ### Éditeur de requête (rouge) — vim
 
-- Modes : normal / insertion / visuel / visuel-ligne
-- Déplacements : `h j k l`, `w b e`, `0 ^ $`, `gg G`, compteurs (`3w`, `2j`…)
-- Opérateurs : `d`, `y`, `c` + motion (`dd`, `dw`, `d$`, `yy`, `cw`, `cc`…)
-- Édition : `i a I A o O`, `x`, `D`, `C`, `s`, `r`, `J`, `p P`
-- `u` undo, `ctrl+r` redo
-- `v` / `V` visuel, puis `y`/`d`/`c`
+Modes : normal / insertion / remplacement (`R`) / visuel (`v`) / visuel-ligne (`V`). Chaque motion ci-dessous fonctionne seule, après un opérateur (`d3w`, `c)`, `y%`, `>}`…) et en mode visuel. Les compteurs se combinent (`2d3w` supprime 6 mots).
+
+| Motions | Touches |
+|---|---|
+| caractères / lignes | `h j k l`, flèches, `espace` / `backspace`, `+` / `↵` / `-` / `_` (premier non-blanc de la ligne suivante / précédente / n-ième) |
+| ligne | `0 ^ $ g_ \|` (`3\|` colonne 3, `2$` fin de la ligne suivante), `gm` milieu |
+| mots / MOTS | `w b e ge` · `W B E gE` |
+| recherche sur la ligne | `f F t T` + caractère, `;` / `,` répéter |
+| buffer | `gg G` (avec compteur : ligne n), `N%` (pourcentage), `H M L` (haut / milieu / bas de l'écran) |
+| défilement | `ctrl+d` / `ctrl+u` (demi-page), `ctrl+f` / `ctrl+b` (page), `zt zz zb` |
+| paragraphes / phrases | `{ }` · `( )` |
+| parenthèses | `%` (correspondante), `[(` `[{` `])` `]}` (parenthèse englobante non fermée) |
+| recherche | `/` `?` + texte + `↵` (smartcase), `n` / `N`, `*` / `#` (mot sous le curseur), `g*` / `g#` |
+| marques | `m{a-z}` poser, `'{a-z}` (ligne) / `` `{a-z} `` (exact), `''` / ` `` ` revenir avant le dernier saut |
+
+| Opérateurs | Touches |
+|---|---|
+| supprimer / copier / changer | `d` `y` `c` + motion ou objet de texte ; doublé sur les lignes : `dd yy cc` |
+| indentation | `>` `<` (`>>`, `3>>`, `>}`) |
+| casse | `g~` inverser, `gu` minuscules, `gU` majuscules (`g~~ guu gUU` sur la ligne), `~` sur le caractère |
+| raccourcis | `x X s S D C Y`, `r` + caractère (`3rx`), `J` / `gJ` joindre (avec compteur), `p P gp gP` coller (`gp` : curseur après) |
+| répétition | `.` rejoue le dernier changement (`3.` avec un nouveau compteur), `u` undo, `ctrl+r` redo |
+
+Objets de texte (après `d y c g~ gu gU` ou en visuel, `i` intérieur / `a` autour) : `w W` mot / MOT, `s` phrase, `p` paragraphe, `" ' `` ` `` guillemets, `( ) b`, `{ } B`, `[ ]`, `< >` parenthèses (multi-lignes, imbrication gérée).
+
+Les cas particuliers suivent vim : `cw` agit comme `ce`, `dw` sur le dernier mot d'une ligne garde le retour à la ligne, une motion exclusive qui finit en colonne 1 devient linéaire (`d}`), `cc`/`S`/`o`/`O` conservent l'indentation.
+
+Mode insertion : `ctrl+w` supprime le mot avant le curseur, `ctrl+u` supprime jusqu'au début de la ligne, `ctrl+n` complétion, `tab` 4 espaces. Entrer en insertion : `i a I A gI o O gi` (`gi` : là où l'insertion a été quittée).
+
+Mode visuel : motions et objets de texte étendent la sélection, `o` échange les extrémités, `gv` resélectionne. Puis `y d x c s` · `Y D X C S R` (lignes entières) · `> <` (avec compteur) · `~ u U` · `J gJ` · `r` + caractère · `p` (remplace par le registre, le texte remplacé va dans le registre).
+
+- `esc` : insertion → normal → mode fenêtre (dans une modale : normal → fermeture)
+- Les yanks vont aussi dans le presse-papier système
+- Non implémenté : visuel par blocs (`ctrl+v`), registres nommés, macros, `=`, commandes `:`. `ctrl+e`, `ctrl+o`, `ctrl+p`, `ctrl+t`, `ctrl+j`, `ctrl+k` sont des raccourcis de l'application.
 - `esc` : insertion → normal → mode fenêtre (dans une modale : normal → fermeture)
 - Les yanks vont aussi dans le presse-papier système
 
